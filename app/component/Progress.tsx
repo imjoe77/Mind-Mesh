@@ -68,10 +68,10 @@ export default function ProgressCard() {
       </div>
 
 
-      {/* Subject progress + deadlines */}
+      {}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Subject progress */}
+        {}
         <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-bold text-zinc-900">
@@ -89,7 +89,7 @@ export default function ProgressCard() {
         </div>
 
 
-        {/* Upcoming deadlines */}
+        {}
         <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
           <h3 className="text-sm font-bold text-zinc-900 mb-4">
             Upcoming deadlines
