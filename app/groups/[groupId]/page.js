@@ -1,106 +1,106 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
+
+function toLocalDateStr(d) {
+  const dd = new Date(d);
+  return `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, "0")}-${String(dd.getDate()).padStart(2, "0")}`;
+}
+
+function nowTimeStr() {
+  const n = new Date();
+  return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`;
+}
 
 export default function GroupDetailPage() {
   const { groupId } = useParams();
   const { data: session } = useSession();
   const router = useRouter();
-  
+
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  
-  // Specific loading states
+
   const [joining, setJoining] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [addingSession, setAddingSession] = useState(false);
+  const [slotAction, setSlotAction] = useState({}); // { [sessionId]: 'joining'|'leaving' }
   const [addingComment, setAddingComment] = useState(false);
 
-  useEffect(() => {
-    fetchGroup();
-  }, [groupId]);
+  useEffect(() => { fetchGroup(); }, [groupId]);
 
-  const fetchGroup = async () => {
+  const fetchGroup = async (quiet = false) => {
     try {
-      const res = await fetch(`/api/groups/${groupId}`);
+      if (!quiet) setLoading(true);
+      const res = await fetch(`/api/groups/${groupId}`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load group");
       setGroup(data.group);
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
   const handleJoin = async () => {
-    if (!session) return router.push("/api/auth/signin");
+    if (!session) return router.push("/Login");
     setJoining(true);
     try {
       const res = await fetch(`/api/groups/${groupId}/join`, { method: "POST" });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || "Failed to join");
-      }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join"); }
       await fetchGroup();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setJoining(false);
-    }
+    } catch (err) { alert(err.message); }
+    finally { setJoining(false); }
   };
 
   const handleLeave = async () => {
     setLeaving(true);
     try {
       const res = await fetch(`/api/groups/${groupId}/leave`, { method: "POST" });
-      if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || "Failed to leave");
-      }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to leave"); }
       await fetchGroup();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setLeaving(false);
-    }
+    } catch (err) { alert(err.message); }
+    finally { setLeaving(false); }
   };
 
-  const handleAddSession = async (e) => {
-    e.preventDefault();
-    setAddingSession(true);
-    const fd = new FormData(e.target);
-    const data = {
-      date: fd.get("date"),
-      startTime: fd.get("startTime"),
-      endTime: fd.get("endTime"),
-      note: fd.get("note")
-    };
-    
+  // Member: join an individual slot
+  const handleJoinSlot = async (sessionId) => {
+    setSlotAction((p) => ({ ...p, [sessionId]: "joining" }));
     try {
-      const res = await fetch(`/api/groups/${groupId}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) throw new Error("Failed to add session");
-      e.target.reset();
-      await fetchGroup();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setAddingSession(false);
-    }
+      const res = await fetch(`/api/groups/${groupId}/sessions/${sessionId}/join`, { method: "POST" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join slot"); }
+      await fetchGroup(true); // quiet refresh
+    } catch (err) { alert(err.message); }
+    finally { setSlotAction((p) => ({ ...p, [sessionId]: null })); }
+  };
+
+  // Member: leave a slot
+  const handleLeaveSlot = async (sessionId) => {
+    setSlotAction((p) => ({ ...p, [sessionId]: "leaving" }));
+    try {
+      const res = await fetch(`/api/groups/${groupId}/sessions/${sessionId}/join`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to leave slot"); }
+      await fetchGroup(true); // quiet refresh
+    } catch (err) { alert(err.message); }
+    finally { setSlotAction((p) => ({ ...p, [sessionId]: null })); }
+  };
+
+  // Owner: delete a slot
+  const handleDeleteSlot = async (sessionId) => {
+    if (!confirm("Remove this session slot?")) return;
+    try {
+      const res = await fetch(`/api/groups/${groupId}/sessions?sessionId=${sessionId}`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to delete slot"); }
+      await fetchGroup(true); // quiet refresh
+    } catch (err) { alert(err.message); }
   };
 
   const handleAddComment = async (e) => {
     e.preventDefault();
     setAddingComment(true);
     const content = e.target.content.value;
-    
     try {
       const res = await fetch(`/api/groups/${groupId}/comments`, {
         method: "POST",
@@ -109,46 +109,42 @@ export default function GroupDetailPage() {
       });
       if (!res.ok) throw new Error("Failed to post comment");
       e.target.reset();
-      await fetchGroup();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setAddingComment(false);
-    }
+      await fetchGroup(true); // quiet refresh
+    } catch (err) { alert(err.message); }
+    finally { setAddingComment(false); }
   };
 
-  if (loading) {
-    return <div className="p-8 text-center text-slate-400 animate-pulse">Loading group details...</div>;
-  }
-  
-  if (error || !group) {
-    return <div className="p-8 text-center text-red-400 bg-red-900/20 max-w-lg mx-auto rounded-xl mt-12 border border-red-800">{error || "Group not found"}</div>;
-  }
+  if (loading) return <div className="p-8 text-center text-slate-400 animate-pulse">Loading group details...</div>;
+  if (error || !group) return <div className="p-8 text-center text-red-400 bg-red-900/20 max-w-lg mx-auto rounded-xl mt-12 border border-red-800">{error || "Group not found"}</div>;
 
-  const isMember = session && group.members.some(m => m._id === session.user.id);
-  const isOwner = session && group.owner._id === session.user.id;
+  const userId = session?.user?.id;
+  const isMember = session && (group.members || []).some(m => String(m._id) === String(userId));
+  const isOwner = session && String(group.owner._id) === String(userId);
+  const inputCls = "bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-colors";
+
+  // Separate windows and slots
+  const windows = (group.sessions || []).filter(s => !s.isSlot);
+  const slots = (group.sessions || []).filter(s => s.isSlot);
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
-      {/* Sidebar - Details */}
+
+      {/* ── Sidebar ── */}
       <div className="lg:col-span-1 space-y-6">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 blur-3xl -mr-10 -mt-10 rounded-full"></div>
-          
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 blur-3xl -mr-10 -mt-10 rounded-full" />
+
           <div className="flex justify-between items-start mb-4">
             <span className="inline-flex text-xs font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
               {group.subject}
             </span>
-            <span className="text-xs text-slate-500">{group.isPrivate ? "Private" : "Public"}</span>
           </div>
-          
+
           <h1 className="text-2xl font-bold text-white mb-2 leading-tight">{group.name}</h1>
           <p className="text-slate-400 text-sm mb-6 leading-relaxed">{group.description || "No description provided."}</p>
-          
+
           <div className="flex items-center gap-3 mb-6 p-4 bg-slate-950 rounded-xl border border-slate-800">
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-300 shadow-inner">
-              {group.owner.name?.charAt(0)}
-            </div>
+            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-300">{group.owner.name?.charAt(0)}</div>
             <div>
               <p className="text-xs text-slate-500 uppercase font-semibold tracking-wider">Host</p>
               <p className="text-sm font-medium text-slate-200">{group.owner.name}</p>
@@ -158,94 +154,166 @@ export default function GroupDetailPage() {
           <div className="mb-6 flex items-center justify-between text-sm">
             <span className="text-slate-400 font-medium">Members</span>
             <span className="text-slate-200 bg-slate-800 px-2 py-1 rounded-md font-mono text-xs border border-slate-700">
-              {group.members.length} / {group.maxMembers}
+              {(group.members || []).length} / {group.maxMembers}
             </span>
           </div>
 
-          <div className="mt-8">
+          <div>
             {!session ? (
-              <button onClick={() => router.push("/api/auth/signin")} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] hover:shadow-[0_0_20px_rgba(79,70,229,0.5)] transform hover:-translate-y-0.5">
-                Sign in to join
-              </button>
+              <button onClick={() => router.push("/Login")} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Sign in to join</button>
             ) : isOwner ? (
-              <div className="w-full py-3 rounded-xl bg-slate-800 border-2 border-slate-700 border-dashed text-slate-400 font-medium text-center shadow-inner cursor-not-allowed">
-                You host this group
-              </div>
+              <div className="w-full py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-medium text-center text-sm">You own this group</div>
             ) : isMember ? (
               <button disabled={leaving} onClick={handleLeave} className="w-full py-3 rounded-xl bg-red-900/50 hover:bg-red-800/80 text-red-200 border border-red-800 font-medium transition-colors disabled:opacity-50">
                 {leaving ? "Leaving..." : "Leave Group"}
               </button>
-            ) : group.members.length >= group.maxMembers ? (
-              <div className="w-full py-3 rounded-xl bg-slate-800 text-slate-500 font-medium text-center">
-                Group is full
-              </div>
+            ) : (group.members || []).length >= group.maxMembers ? (
+              <div className="w-full py-3 rounded-xl bg-slate-800 text-slate-500 font-medium text-center">Group is full</div>
             ) : (
-              <button disabled={joining} onClick={handleJoin} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all shadow-[0_0_15px_rgba(79,70,229,0.4)] hover:-translate-y-0.5 disabled:opacity-50">
+              <button disabled={joining} onClick={handleJoin} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all disabled:opacity-50">
                 {joining ? "Joining..." : "Join Study Group"}
               </button>
             )}
           </div>
         </div>
 
-        {/* Tags */}
-        {group.tags && group.tags.length > 0 && (
+        {(group.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-2">
             {group.tags.map(t => (
-              <span key={t} className="px-3 py-1 text-xs font-mono rounded-md bg-slate-900 border border-slate-800 text-slate-400">
-                #{t}
-              </span>
+              <span key={t} className="px-3 py-1 text-xs font-mono rounded-md bg-slate-900 border border-slate-800 text-slate-400">#{t}</span>
             ))}
           </div>
         )}
       </div>
 
-      {/* Main Content Area - Calendar/Sessions & Discussion */}
+      {/* ── Main ── */}
       <div className="lg:col-span-2 space-y-8">
-        
-        {/* Calendar / Sessions */}
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-              <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              Weekly Schedule
-            </h2>
-          </div>
 
-          {group.sessions?.length === 0 ? (
+        {/* Sessions */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
+          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2 mb-6">
+            <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" />
+            </svg>
+            Session Slots
+          </h2>
+
+          {(group.sessions || []).length === 0 ? (
             <div className="text-center py-10 rounded-xl bg-slate-950/50 border border-slate-800 border-dashed">
-              <p className="text-slate-500 text-sm">No upcoming sessions. Check back later.</p>
+              <p className="text-slate-500 text-sm">No sessions scheduled yet.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {group.sessions.map((session, idx) => (
-                <div key={idx} className="bg-slate-950 p-4 rounded-xl border-l-4 border-indigo-500 border-y border-r border-y-slate-800 border-r-slate-800 flex flex-col hover:border-indigo-400 transition-colors">
-                  <span className="text-xs text-indigo-400 font-semibold mb-1 uppercase tracking-wider">
-                    {new Date(session.date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </span>
-                  <div className="text-lg font-bold text-slate-200 mb-2 font-mono">
-                    {session.startTime} - {session.endTime}
-                  </div>
-                  {session.note && <p className="text-sm text-slate-400 bg-slate-900/50 p-2 rounded-md">{session.note}</p>}
-                </div>
-              ))}
-            </div>
-          )}
+            <div className="space-y-3">
+              {(group.sessions || []).map((s) => {
+                const dateStr = toLocalDateStr(new Date(s.date));
+                const now = new Date();
+                const sessionStart = new Date(`${dateStr}T${s.startTime}:00`);
+                const sessionEnd = new Date(`${dateStr}T${s.endTime}:00`);
+                
+                const isPast = sessionEnd < now;
+                const isInProgress = now >= sessionStart && now <= sessionEnd;
+                const dbStatus = s.status || "scheduled";
+                const isLive = dbStatus === "active" || isInProgress;
+                
+                // Extra robust join check: handle objects, IDs, and nulls
+                const hasJoined = (s.participants || []).some(p => {
+                  const pId = p?._id ? String(p._id) : String(p);
+                  return pId === String(userId);
+                });
+                
+                const acting = slotAction[s._id];
 
-          {/* Add Session Form */}
-          {isMember && (
-            <div className="mt-8 pt-6 border-t border-slate-800">
-              <h3 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Suggest a New Time Slot</h3>
-              <form onSubmit={handleAddSession} className="flex flex-col sm:flex-row gap-3">
-                <input type="date" name="date" required className="bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none flex-grow" />
-                <input type="time" name="startTime" required className="bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <input type="time" name="endTime" required className="bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <input type="text" name="note" placeholder="Topic (Optional)" className="bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none flex-grow" />
-                <button disabled={addingSession} type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg px-4 py-2 font-medium text-sm transition-colors disabled:opacity-50 whitespace-nowrap">
-                  {addingSession ? "+" : "Add Slot"}
-                </button>
-              </form>
+                return (
+                  <div key={s._id} className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-4 transition-all ${
+                    isPast || dbStatus === "completed" ? "border-slate-800 bg-slate-950/30 opacity-50" : 
+                    isLive ? "border-green-500/50 bg-green-500/5 shadow-[0_0_15px_rgba(34,197,94,0.1)] relative overflow-hidden" :
+                    "border-slate-700 bg-slate-950 hover:border-indigo-600/40"
+                  }`}>
+                    {isLive && <div className="absolute top-0 left-0 w-1 h-full bg-green-500 animate-pulse" />}
+                    
+                    {/* Date + time */}
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs font-bold uppercase tracking-wider ${
+                          isPast || dbStatus === "completed" ? "text-slate-500" : 
+                          isLive ? "text-green-400" :
+                          "text-indigo-400"
+                        }`}>
+                          {new Date(s.date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+                        </span>
+                        {(isPast || dbStatus === "completed") && <span className="text-[10px] bg-slate-800 text-slate-600 px-2 py-0.5 rounded-full">Completed</span>}
+                        {isLive && (
+                          <span className="flex items-center gap-1 text-[10px] bg-green-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
+                            <span className="w-1.5 h-1.5 bg-white rounded-full" />
+                            LIVE NOW
+                          </span>
+                        )}
+                        {!isPast && !isLive && dbStatus === "scheduled" && (
+                          <span className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-800/40 px-2 py-0.5 rounded-full">Scheduled</span>
+                        )}
+                      </div>
+                      <div className={`text-base font-bold font-mono ${isLive ? "text-green-50" : "text-slate-200"}`}>
+                        {s.startTime} – {s.endTime}
+                      </div>
+                      {s.note && <p className="text-xs text-slate-500 mt-1">{s.note}</p>}
+                    </div>
+
+                    {/* Participant count + actions */}
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className="text-xs text-slate-500">
+                        <span className="text-slate-300 font-semibold">{s.participants?.length ?? 0}</span> joined
+                      </span>
+
+                      {/* Owner: delete slot */}
+                      {isOwner && !isPast && (
+                        <button
+                          onClick={() => handleDeleteSlot(s._id)}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-red-900/30 text-red-400 border border-red-900/50 hover:bg-red-900/60 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      )}
+
+                      {/* Members: join / leave a slot */}
+                      {isMember && !isOwner && !isPast && (
+                        hasJoined ? (
+                          <button
+                            onClick={() => handleLeaveSlot(s._id)}
+                            disabled={acting === "leaving"}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:border-red-700 hover:text-red-400 transition-colors disabled:opacity-50"
+                          >
+                            {acting === "leaving" ? "..." : "Leave Slot"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleJoinSlot(s._id)}
+                            disabled={acting === "joining"}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-all shadow-sm disabled:opacity-50"
+                          >
+                            {acting === "joining" ? "..." : "Join Slot"}
+                          </button>
+                        )
+                      )}
+
+                      {/* Badge for already joined */}
+                      {hasJoined && !isPast && (
+                        <span className="text-[10px] bg-green-900/30 border border-green-800/40 text-green-400 px-2 py-0.5 rounded-full">You&apos;re in</span>
+                      )}
+
+                      {/* 🚀 Enter Study Room — shown when session is live */}
+                      {isLive && (isMember || isOwner) && (
+                        <button
+                          onClick={() => router.push(`/groups/${groupId}/session/${s._id}`)}
+                          className="text-xs px-4 py-1.5 rounded-lg bg-green-500 text-white font-bold hover:bg-green-400 transition-all shadow-lg shadow-green-500/30 flex items-center gap-1.5"
+                        >
+                          <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
+                          Enter Study Room
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -261,9 +329,7 @@ export default function GroupDetailPage() {
 
           <div className="space-y-4 mb-6 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
             {group.comments?.length === 0 ? (
-               <div className="text-center py-8">
-                 <p className="text-slate-500 text-sm">Be the first to start the conversation.</p>
-               </div>
+              <div className="text-center py-8"><p className="text-slate-500 text-sm">Be the first to start the conversation.</p></div>
             ) : (
               group.comments.map(c => (
                 <div key={c._id} className="bg-slate-950 rounded-xl p-4 border border-slate-800/50 flex gap-4">
@@ -273,9 +339,7 @@ export default function GroupDetailPage() {
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs font-semibold text-slate-300">{c.author?.name || "Unknown"}</span>
-                      <span className="text-[10px] text-slate-600">
-                         {new Date(c.createdAt).toLocaleDateString()}
-                      </span>
+                      <span className="text-[10px] text-slate-600">{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
                     <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{c.content}</p>
                   </div>
@@ -284,39 +348,25 @@ export default function GroupDetailPage() {
             )}
           </div>
 
-          {isMember ? (
+          {isMember || isOwner ? (
             <form onSubmit={handleAddComment} className="flex gap-3">
-              <textarea 
-                name="content"
-                required
-                rows="1"
-                placeholder="Share your thoughts with the group..."
-                className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none min-h-[48px] transition-all"
-              />
-              <button disabled={addingComment} type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-2 font-medium transition-all shadow-[0_4px_10px_rgba(79,70,229,0.3)] disabled:opacity-50 flex items-center justify-center flex-shrink-0">
+              <textarea name="content" required rows="1" placeholder="Share something with the group..." className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none min-h-[48px] transition-all" />
+              <button disabled={addingComment} type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-2 font-medium transition-all disabled:opacity-50 flex-shrink-0">
                 {addingComment ? "..." : "Post"}
               </button>
             </form>
           ) : (
             <div className="text-center py-4 bg-slate-950 rounded-xl border border-slate-800 text-slate-500 text-sm">
-              You must be a member to participate in the discussion.
+              Join the group to participate in the discussion.
             </div>
           )}
         </section>
-
       </div>
-      
+
       <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: #334155;
-          border-radius: 20px;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 20px; }
       `}</style>
     </div>
   );

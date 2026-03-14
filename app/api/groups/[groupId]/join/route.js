@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import connectDB from "@/app/db/connectDB";
+import { authOptions } from "@/app/auth";
+import connectDB from "@/db/connectDB";
 import Group from "@/app/models/Group";
 
 // POST /api/groups/[groupId]/join
 export async function POST(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const userId = session.user.id;

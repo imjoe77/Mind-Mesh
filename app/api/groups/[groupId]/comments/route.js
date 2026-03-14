@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import connectDB from "@/app/db/connectDB";
+import { authOptions } from "@/app/auth";
+import connectDB from "@/db/connectDB";
 import Group from "@/app/models/Group";
 
 // GET /api/groups/[groupId]/comments — full discussion thread
 export async function GET(req, { params }) {
   try {
+    const { groupId } = await params;
     await connectDB();
 
-    const group = await Group.findById(params.groupId)
+    const group = await Group.findById(groupId)
       .select("comments")
       .populate("comments.author", "name profilePicture");
 
@@ -25,6 +26,7 @@ export async function GET(req, { params }) {
 // POST /api/groups/[groupId]/comments — members only
 export async function POST(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -35,7 +37,7 @@ export async function POST(req, { params }) {
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     if (!group.members.map(String).includes(session.user.id)) {
@@ -59,6 +61,7 @@ export async function POST(req, { params }) {
 // author can delete own comment, group owner can delete any
 export async function DELETE(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -71,7 +74,7 @@ export async function DELETE(req, { params }) {
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const comment = group.comments.id(commentId);
