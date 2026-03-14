@@ -5,15 +5,13 @@ import { Providers } from "./providers";
 import SocketProvider from "./Components/SocketProvider";
 
 export default function RootLayout({ children }) {
+  
+
   return (
     <html lang="en">
       <body>
-        <Providers>
-          <SocketProvider>
-            <Header />
-            {children}
-          </SocketProvider>
-        </Providers>
+        <Header/>
+        {children}
       </body>
     </html>
   );

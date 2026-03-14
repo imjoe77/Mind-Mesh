@@ -1,9 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-import { TypeAnimation } from "react-type-animation";
-import Link from 'next/link';
-
 export default function Hero() {
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
 
@@ -97,12 +93,15 @@ export default function Hero() {
         </p>
 
         <div className="flex justify-center gap-4">
-          <Link href="/Login">
-          <button className="relative inline-flex items-center justify-center px-8 py-3 rounded-xl overflow-hidden text-sm md:text-base font-semibold text-white bg-slate-900/40 border border-blue-500/40 backdrop-blur shadow-lg shadow-blue-500/20 transition-all group">
-            <span className="absolute inset-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 translate-x-[-100%] group-hover:translate-x-0 transition-transform duration-300"></span>
-            <span className="relative">Start Learning</span>
+
+          <button className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl shadow-lg hover:-translate-y-1 transition">
+            Start Learning
           </button>
-          </Link>
+
+          {/* <button className="border border-gray-300 px-8 py-3 rounded-xl hover:bg-gray-100 transition">
+            View Demo
+          </button> */}
+
         </div>
 
       </div>

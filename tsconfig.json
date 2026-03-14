@@ -34,7 +34,7 @@
     "**/*.mts",
     "**/*.ts",
     "**/*.tsx"
-  ],
+, "app/component/WelcomeBar.js", "app/component/UpcomingRow.tsx"  ],
   "exclude": [
     "node_modules"
   ]
