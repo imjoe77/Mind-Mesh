@@ -1,10 +1,4 @@
-interface InfoRowProps {
-  label: string
-  value: string
-  highlight?: boolean
-}
-
-export default function InfoRow({ label, value, highlight }: InfoRowProps) {
+export default function InfoRow({ label, value, highlight }) {
   return (
     <div className="flex justify-between py-2 border-b border-zinc-100">
       <span className="text-xs text-zinc-400">{label}</span>

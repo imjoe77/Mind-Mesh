@@ -1,6 +1,4 @@
-import { Activity } from "../types/student"
-
-export default function ActivityRow({ text, bold, time, color }: Activity) {
+export default function ActivityRow({ text, bold, time, color }) {
   const parts = text.split(bold)
 
   return (

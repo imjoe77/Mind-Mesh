@@ -1,6 +1,4 @@
-import { Subject } from "../types/student"
-
-export default function SubjectBar({ name, percent, color }: Subject) {
+export default function SubjectBar({ name, percent, color }) {
   return (
     <div className="flex items-center gap-3 mb-3">
       <span className="text-xs w-24">{name}</span>

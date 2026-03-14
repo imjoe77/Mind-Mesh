@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import connectDB from "@/app/db/connectDB";
+import { authOptions } from "@/app/auth";
+import connectDB from "@/db/connectDB";
 import Group from "@/app/models/Group";
 
-// GET /api/groups/[groupId]/sessions — fetch all time slots (for calendar)
+// GET /api/groups/[groupId]/sessions
 export async function GET(req, { params }) {
   try {
+    const { groupId } = await params;
     await connectDB();
 
-    const group = await Group.findById(params.groupId).select("sessions name");
+    const group = await Group.findById(groupId)
+      .select("sessions")
+      .populate("sessions.participants", "name email profilePicture");
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     return NextResponse.json({ sessions: group.sessions });
@@ -19,44 +22,10 @@ export async function GET(req, { params }) {
   }
 }
 
-// POST /api/groups/[groupId]/sessions — add a session slot (members only)
-export async function POST(req, { params }) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const { date, startTime, endTime, note } = await req.json();
-
-    if (!date || !startTime || !endTime) {
-      return NextResponse.json(
-        { error: "date, startTime, and endTime are required" },
-        { status: 400 }
-      );
-    }
-
-    await connectDB();
-
-    const group = await Group.findById(params.groupId);
-    if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
-
-    if (!group.members.map(String).includes(session.user.id)) {
-      return NextResponse.json({ error: "Only members can add sessions" }, { status: 403 });
-    }
-
-    group.sessions.push({ date, startTime, endTime, note });
-    await group.save();
-
-    const newSession = group.sessions[group.sessions.length - 1];
-    return NextResponse.json({ session: newSession }, { status: 201 });
-  } catch (err) {
-    console.error("[ADD_SESSION]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
-
 // DELETE /api/groups/[groupId]/sessions?sessionId=xxx — owner only
 export async function DELETE(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -69,7 +38,7 @@ export async function DELETE(req, { params }) {
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     if (group.owner.toString() !== session.user.id) {

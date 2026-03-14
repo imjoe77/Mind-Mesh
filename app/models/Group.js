@@ -13,7 +13,13 @@ const SessionSchema = new mongoose.Schema({
   startTime: { type: String, required: true },
   endTime: { type: String, required: true },
   note: { type: String, default: "", maxlength: 300 },
-});
+  status: { 
+    type: String, 
+    enum: ["scheduled", "active", "completed"], 
+    default: "scheduled" 
+  },
+  participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+}, { strictPopulate: false });
 
 const GroupSchema = new mongoose.Schema(
   {
@@ -31,11 +37,14 @@ const GroupSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-GroupSchema.pre("save", function (next) {
-  if (this.isNew && !this.members.map(String).includes(this.owner.toString())) {
-    this.members.push(this.owner);
+GroupSchema.pre("save", function () {
+  if (this.isNew && this.owner) {
+    const ownerId = this.owner.toString();
+    const memberIds = this.members.map(m => m.toString());
+    if (!memberIds.includes(ownerId)) {
+      this.members.push(this.owner);
+    }
   }
-  next();
 });
 
 export default mongoose.models.Group || mongoose.model("Group", GroupSchema);

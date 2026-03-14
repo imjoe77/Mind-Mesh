@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import connectDB from "@/app/db/connectDB";
+import { authOptions } from "@/app/auth";
+import connectDB from "@/db/connectDB";
 import Group from "@/app/models/Group";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // GET /api/groups/[groupId]
 export async function GET(req, { params }) {
   try {
+    const { groupId } = await params;
     await connectDB();
 
-    const group = await Group.findById(params.groupId)
+    const group = await Group.findById(groupId)
       .populate("owner", "name email profilePicture")
       .populate("members", "name email profilePicture")
+      .populate({
+        path: "sessions.participants",
+        select: "name email profilePicture",
+        options: { strictPopulate: false }
+      })
       .populate("comments.author", "name profilePicture");
 
     if (!group) {
@@ -20,20 +29,21 @@ export async function GET(req, { params }) {
 
     return NextResponse.json({ group });
   } catch (err) {
-    console.error("[GET_GROUP]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("[GET_GROUP] Error:", err);
+    return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
   }
 }
 
 // PATCH /api/groups/[groupId] — owner only
 export async function PATCH(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     if (group.owner.toString() !== session.user.id) {
@@ -57,12 +67,13 @@ export async function PATCH(req, { params }) {
 // DELETE /api/groups/[groupId] — owner only
 export async function DELETE(req, { params }) {
   try {
+    const { groupId } = await params;
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await connectDB();
 
-    const group = await Group.findById(params.groupId);
+    const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     if (group.owner.toString() !== session.user.id) {

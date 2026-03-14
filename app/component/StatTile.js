@@ -1,10 +1,4 @@
-interface Props {
-  value: string
-  label: string
-  sub?: string
-}
-
-export default function StatTile({ value, label, sub }: Props) {
+export default function StatTile({ value, label, sub }) {
   return (
     <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-4 hover:scale-105 transition">
       <p className="text-2xl font-bold">{value}</p>

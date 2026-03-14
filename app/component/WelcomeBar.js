@@ -1,18 +1,15 @@
 "use client"
 
-const STUDENT = {
-  name: "Alice Lawson",
-  semester: "Spring 2026"
-}
+export default function WelcomeBar({ user }) {
+  const name = user?.name || "Student"
+  
+  const INITIALS = name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2)
 
-const INITIALS = STUDENT.name
-  .split(" ")
-  .map((n) => n[0])
-  .join("")
-  .toUpperCase()
-  .slice(0, 2)
-
-export default function WelcomeBar() {
   return (
     <div className="bg-white border-b border-zinc-200 px-6 lg:px-8 py-4 flex justify-between items-center sticky top-0 z-10">
 
@@ -23,7 +20,7 @@ export default function WelcomeBar() {
         </span>
 
         <span className="text-lg font-bold text-zinc-900 tracking-tight">
-          Welcome back, {STUDENT.name.split(" ")[0]} 👋
+          Welcome back, {name.split(" ")[0]} 👋
         </span>
       </div>
 
@@ -32,7 +29,7 @@ export default function WelcomeBar() {
 
         <div className="text-right hidden sm:block">
           <p className="text-sm font-semibold text-zinc-800">
-            {STUDENT.semester}
+            Spring 2026
           </p>
 
           <p className="text-xs text-zinc-400">
@@ -41,9 +38,13 @@ export default function WelcomeBar() {
         </div>
 
         {/* Avatar */}
-        <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">
-          {INITIALS}
-        </div>
+        {user?.image ? (
+          <img src={user.image} alt={name} className="w-10 h-10 rounded-full object-cover" />
+        ) : (
+          <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">
+            {INITIALS}
+          </div>
+        )}
 
       </div>
     </div>
