@@ -1,28 +1,3 @@
-// 'use client';
-
-// export default function CTA() {
-//   return (
-//     <section className="bg-gradient-to-r from-blue-600 to-indigo-600 py-24 px-6 lg:px-10">
-
-//       <div className="max-w-4xl mx-auto text-center">
-
-//         <h2 className="text-4xl font-bold text-white mb-6">
-//           Ready to learn smarter?
-//         </h2>
-
-//         <p className="text-blue-100 text-lg mb-10">
-//           Join thousands of students collaborating and growing together.
-//         </p>
-
-//         <button className="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold shadow-md hover:shadow-xl hover:-translate-y-1 transition">
-//           Get Started Free
-//         </button>
-
-//       </div>
-
-//     </section>
-//   );
-// }
 'use client';
 
 export default function CTA() {
@@ -40,19 +15,22 @@ export default function CTA() {
         </h2>
 
         <p className="text-blue-100 text-lg mb-10 max-w-2xl mx-auto">
-          Join thousands of students collaborating, sharing knowledge,
-          and achieving their learning goals together.
+          <b>
+            Join thousands of students collaborating, sharing knowledge,
+            and achieving their learning goals together.
+          </b>
         </p>
 
         <div className="flex justify-center gap-4 flex-wrap">
 
           {/* Primary button */}
-          <button className="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold shadow-lg hover:shadow-2xl hover:-translate-y-1 transition duration-300">
+          <button
+            className="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold
+  shadow-lg transition-transform duration-300 ease-in-out
+  hover:-translate-y-2 hover:shadow-2xl"
+          >
             Get Started Free
           </button>
-
-         
-
         </div>
 
       </div>

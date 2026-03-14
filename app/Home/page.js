@@ -1,6 +1,6 @@
 import Header from "../Components/Header";
 import Hero from"../Components/Hero";
-import Features from "../Components/Features";
+
 import CTA from "../Components/CTA";
 
 import Footer from "../Components/Footer";
@@ -17,7 +17,7 @@ export default function Home() {
     <main className="min-h-screen bg-white dark:bg-slate-900">
       {/* <Header /> */}
       <Hero />
-      <Features />
+      
      
       <CTA />
       <Footer />
