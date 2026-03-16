@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 
-export default function CreateGroupPage() {
+function CreateGroupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
@@ -340,5 +340,13 @@ export default function CreateGroupPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function CreateGroupPage() {
+  return (
+    <Suspense fallback={<div className="max-w-2xl mx-auto py-8 px-4 text-slate-400">Loading...</div>}>
+      <CreateGroupForm />
+    </Suspense>
   );
 }

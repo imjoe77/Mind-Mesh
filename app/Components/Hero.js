@@ -1,6 +1,12 @@
 'use client';
 
+import { useState } from 'react';
+import { TypeAnimation } from 'react-type-animation';
+import { useSession } from 'next-auth/react';
+import Link from 'next/link';
+
 export default function Hero() {
+  const { data: session } = useSession();
   const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
 
   const handleMouseMove = (e) => {
@@ -92,17 +98,15 @@ export default function Hero() {
           support for other learners — all inside a single student-first platform.
         </p>
 
-        <div className="flex justify-center gap-4">
-
-          <button className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl shadow-lg hover:-translate-y-1 transition">
-            Start Learning
-          </button>
-
-          {/* <button className="border border-gray-300 px-8 py-3 rounded-xl hover:bg-gray-100 transition">
-            View Demo
-          </button> */}
-
-        </div>
+        {!session && (
+          <div className="flex justify-center gap-4">
+            <Link href="/Home">
+              <button className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl shadow-lg hover:-translate-y-1 transition">
+                Start Learning
+              </button>
+            </Link>
+          </div>
+        )}
 
       </div>
 

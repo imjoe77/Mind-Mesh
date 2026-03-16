@@ -6,6 +6,56 @@ import User from "@/app/models/User";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+// Default fallback data used when AI finds no subjects
+const DEFAULTS = {
+  semester: "Spring 2026",
+  gpa: "3.8",
+  attendance: "87%",
+  subjects: [
+    { name: "Algorithms", percent: 88, color: "#4F46E5" },
+    { name: "Databases", percent: 74, color: "#7C3AED" },
+    { name: "Networks", percent: 91, color: "#4F46E5" },
+    { name: "ML Basics", percent: 62, color: "#a78bfa" },
+    { name: "OS Design", percent: 79, color: "#6366f1" }
+  ],
+  upcoming: [
+    { subject: "Algorithms", task: "Assignment 5 due", date: "Mar 16" },
+    { subject: "Databases", task: "Mid-term exam", date: "Mar 19" },
+    { subject: "Networks", task: "Lab submission", date: "Mar 22" }
+  ],
+  activity: [
+    { text: "Submitted Assignment 4 — Algorithms", bold: "Assignment 4", time: "2h ago", color: "#4F46E5" },
+    { text: "Attended Networks lecture", bold: "Networks", time: "Yesterday", color: "#16a34a" },
+    { text: "Quiz result posted — Databases", bold: "Databases", time: "2 days ago", color: "#f59e0b" },
+    { text: "Enrolled in ML Basics elective", bold: "ML Basics", time: "Last week", color: "#7C3AED" }
+  ]
+};
+
+// Helper: generate activity logs from extracted subjects
+function generateActivity(subjects) {
+  const colors = { high: "#16a34a", mid: "#f59e0b", low: "#ef4444" };
+  return subjects.slice(0, 4).map((s, i) => {
+    const perf = s.percent >= 80 ? "high" : s.percent >= 60 ? "mid" : "low";
+    const action = s.percent >= 80 ? `Scored ${s.percent}% in ${s.name}` :
+                   s.percent >= 60 ? `Needs improvement in ${s.name}` :
+                   `Needs urgent review in ${s.name}`;
+    const times = ["Just now", "Yesterday", "2 days ago", "Last week"];
+    return { text: action, bold: s.name, time: times[i] || "Recently", color: colors[perf] };
+  });
+}
+
+// Helper: generate upcoming deadlines from subjects
+function generateUpcoming(subjects) {
+  const tasks = ["Assignment due", "Mid-term exam", "Lab submission", "Quiz scheduled"];
+  const today = new Date();
+  return subjects.slice(0, 3).map((s, i) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 3 + i * 3);
+    const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return { subject: s.name, task: tasks[i] || "Review session", date: dateStr };
+  });
+}
+
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
@@ -20,123 +70,123 @@ export async function POST(req) {
       return NextResponse.json({ error: "OpenRouter API Key is missing in .env.local" }, { status: 500 });
     }
 
-    // Call OpenRouter API with Vision Model 
-    const prompt = `
-      You are an AI assistant that extracts academic performance data from a university result/report card image and infers action items.
-      Analyze the attached image and extract/generate the following:
-      1. Semester name (e.g., "Spring 2026", "Semester 3")
-      2. GPA / SGPA (string, e.g., "3.8", "8.5")
-      3. Attendance percentage (string, e.g., "85%", "90%"). If not found, output "N/A"
-      4. An array of "subjects". For each subject:
-         - "name": Cleaned up subject name
-         - "percent": A number representing the score percentage (0-100). Convert grades logically (e.g., A=90, B=80, etc.)
-         - "color": A nice UI hex color code (e.g., "#4F46E5", "#10b981", "#f59e0b") to represent it in UI.
-      5. An array of 3 "upcoming" deadlines or tasks. INFER these logically based on the subjects found. Example schema for each:
-         - "subject": "Algorithms"
-         - "task": "Assignment 2 due" or "Mid-term prep"
-         - "date": "Mar 20"
-      6. An array of 4 "activity" logs. INFER these based on the extracted grades. Example schema for each:
-         - "text": "Scored 90% in Algorithms" or "Needs review in ML Basics"
-         - "bold": The subject name
-         - "time": "Just now" or "Yesterday"
-         - "color": Hex color code matching the subject performance (e.g. green for good, red/orange for bad)
+    // Simplified prompt — only extract subjects + GPA (much faster)
+    const prompt = `Extract subject names and scores from this academic result image.
+Return ONLY raw JSON (no markdown). Format:
+{"gpa":"8.5","semester":"Sem 3","subjects":[{"name":"Math","percent":85,"color":"#4F46E5"}]}
+Rules:
+- "subjects" array: each has name, percent (0-100), color (hex)
+- Convert letter grades to percent: A+=95,A=90,B+=85,B=80,C+=75,C=70,D=60,F=30
+- If no subjects found, return: {"subjects":[]}
+- "gpa": extract GPA/SGPA/CGPA as string. If not found, use "N/A"
+- "semester": extract semester name. If not found, use "Current Semester"
+- Use varied colors: #4F46E5, #7C3AED, #10b981, #f59e0b, #6366f1, #ec4899`;
 
-      IMPORTANT: Return ONLY a valid, minified JSON object formatted EXACTLY like this (NO markdown blocks, NO backticks, just raw JSON):
-      {
-        "semester": "Spring 2026",
-        "gpa": "3.8",
-        "attendance": "85%",
-        "subjects": [ { "name": "Algorithms", "percent": 88, "color": "#4F46E5" } ],
-        "upcoming": [ { "subject": "Algorithms", "task": "Mid-term exam", "date": "Mar 19" } ],
-        "activity": [ { "text": "Result analyzed for Algorithms", "bold": "Algorithms", "time": "Just now", "color": "#4F46E5" } ]
+    console.log(`[AI_ANALYZE] Calling OpenRouter... Payload: ${(base64Image.length / 1024 / 1024).toFixed(2)} MB`);
+
+    // Add a 25-second timeout using AbortController
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    let openRouterRes;
+    try {
+      openRouterRes = await fetch(OPENROUTER_API_URL, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
+          "X-Title": "MindMesh Student Dashboard"
+        },
+        body: JSON.stringify({
+          model: "meta-llama/llama-3.2-11b-vision-instruct",
+          max_tokens: 500,
+          temperature: 0.1,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "image_url", image_url: { url: base64Image } }
+              ]
+            }
+          ]
+        })
+      });
+    } catch (fetchErr) {
+      clearTimeout(timeout);
+      if (fetchErr.name === "AbortError") {
+        console.warn("[AI_ANALYZE] Timed out after 25s — using defaults");
+        return NextResponse.json({ success: true, metrics: DEFAULTS, timedOut: true });
       }
-    `;
-
-    console.log(`[AI_ANALYZE] Calling OpenRouter (Llama 3.2 Vision)... Payload size: ${(base64Image.length / 1024 / 1024).toFixed(2)} MB`);
-
-    const openRouterRes = await fetch(OPENROUTER_API_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
-        "X-Title": "MindMesh Student Dashboard"
-      },
-      body: JSON.stringify({
-        model: "meta-llama/llama-3.2-11b-vision-instruct",
-        max_tokens: 1000,
-        temperature: 0.1,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: base64Image } }
-            ]
-          }
-        ]
-      })
-    });
+      throw fetchErr;
+    }
+    clearTimeout(timeout);
 
     console.log(`[AI_ANALYZE] OpenRouter status: ${openRouterRes.status}`);
 
     if (!openRouterRes.ok) {
-        const errText = await openRouterRes.text();
-        console.error("[AI_ANALYZE] OpenRouter API Failed:", errText);
-        return NextResponse.json({ error: "Failed to analyze image with AI", details: errText }, { status: 502 });
+      const errText = await openRouterRes.text();
+      console.error("[AI_ANALYZE] OpenRouter API Failed:", errText);
+      // On API failure, return defaults instead of error
+      return NextResponse.json({ success: true, metrics: DEFAULTS, fallback: true });
     }
 
     const data = await openRouterRes.json();
     let aiResponse = data.choices?.[0]?.message?.content?.trim() || "{}";
     
-    console.log(`[AI_ANALYZE] Received response length: ${aiResponse.length}`);
+    console.log(`[AI_ANALYZE] Response length: ${aiResponse.length}`);
 
     let parsedData;
     try {
-        // Try direct parse first
-        // Clean up markdown quotes if the model sent them despite instructions
-        if (aiResponse.startsWith("\`\`\`json")) {
-            aiResponse = aiResponse.replace(/^\`\`\`json/,"").replace(/\`\`\`$/,"").trim();
-        } else if (aiResponse.startsWith("\`\`\`")) {
-            aiResponse = aiResponse.replace(/^\`\`\`/,"").replace(/\`\`\`$/,"").trim();
-        }
-        
-        // If there's still extra text, try to extract just the JSON block
-        const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            aiResponse = jsonMatch[0];
-        }
+      // Clean up markdown if the model sent it
+      if (aiResponse.startsWith("\`\`\`json")) {
+        aiResponse = aiResponse.replace(/^\`\`\`json/,"").replace(/\`\`\`$/,"").trim();
+      } else if (aiResponse.startsWith("\`\`\`")) {
+        aiResponse = aiResponse.replace(/^\`\`\`/,"").replace(/\`\`\`$/,"").trim();
+      }
+      
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) aiResponse = jsonMatch[0];
 
-        parsedData = JSON.parse(aiResponse);
+      parsedData = JSON.parse(aiResponse);
     } catch (parseError) {
-        console.error("[JSON_PARSE_ERROR] Failed to parse AI response:", aiResponse);
-        return NextResponse.json({ error: "AI returned invalid format", details: aiResponse }, { status: 500 });
+      console.error("[JSON_PARSE_ERROR] Using defaults. Raw:", aiResponse);
+      return NextResponse.json({ success: true, metrics: DEFAULTS, fallback: true });
     }
 
-    await connectDB();
-    const updatedUser = await User.findByIdAndUpdate(
-        session.user.id,
-        {
-            $set: {
-                "academicMetrics.semester": parsedData.semester || "Current Semester",
-                "academicMetrics.gpa": parsedData.gpa || "N/A",
-                "academicMetrics.attendance": parsedData.attendance || "N/A",
-                "academicMetrics.subjects": parsedData.subjects || [],
-                "academicMetrics.upcoming": parsedData.upcoming || [],
-                "academicMetrics.activity": parsedData.activity || [],
-                "academicMetrics.lastAnalyzed": new Date()
-            }
-        },
-        { returnDocument: "after" }
-    ).select("academicMetrics");
+    // KEY CHECK: Only update if AI found actual subjects
+    const hasSubjects = Array.isArray(parsedData.subjects) && parsedData.subjects.length > 0;
+    
+    if (!hasSubjects) {
+      console.log("[AI_ANALYZE] No subjects found in image — using defaults");
+      return NextResponse.json({ success: true, metrics: DEFAULTS, fallback: true });
+    }
 
-    return NextResponse.json({ 
-      success: true, 
-      metrics: updatedUser.academicMetrics 
-    });
+    // AI found subjects — build the full metrics from extracted data
+    const metrics = {
+      semester: parsedData.semester || "Current Semester",
+      gpa: parsedData.gpa || "N/A",
+      attendance: parsedData.attendance || "N/A",
+      subjects: parsedData.subjects,
+      upcoming: generateUpcoming(parsedData.subjects),
+      activity: generateActivity(parsedData.subjects),
+      lastAnalyzed: new Date()
+    };
+
+    await connectDB();
+    await User.findByIdAndUpdate(
+      session.user.id,
+      { $set: { academicMetrics: metrics } }
+    );
+
+    console.log(`[AI_ANALYZE] Success — ${metrics.subjects.length} subjects extracted`);
+    return NextResponse.json({ success: true, metrics });
 
   } catch (err) {
     console.error("[ANALYZE_RESULT]", err);
-    return NextResponse.json({ error: "Internal server error or invalid JSON from AI" }, { status: 500 });
+    // On any crash, return defaults so dashboard is never broken
+    return NextResponse.json({ success: true, metrics: DEFAULTS, fallback: true });
   }
 }

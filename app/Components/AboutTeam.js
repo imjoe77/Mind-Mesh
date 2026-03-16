@@ -75,7 +75,7 @@ export default function AboutTeam() {
     {
       name: "Nathaniel Bandi",
       role: "Backend Developer",
-      image: "/joel.jpg",
+      image: "/joel.jpeg",
     },
     {
       name: "Nikhil Pujar",
@@ -90,7 +90,7 @@ export default function AboutTeam() {
     {
       name: "Abhijith Kadakuntla",
       role: "Documentation/Presentation",
-      image: "/abhijithcard.png",
+      image: "/abhijithcard.jpeg",
     },
   ];
 
@@ -111,7 +111,7 @@ export default function AboutTeam() {
               className="group flex flex-col items-center text-center rounded-3xl bg-slate-900/80 border border-slate-800 p-6 shadow-lg hover:shadow-blue-500/30 hover:border-blue-400/60 transition-all duration-300 hover:-translate-y-2"
             >
               {/* Small round profile image */}
-              <div className="relative w-24 h-24 mb-4 rounded-full overflow-hidden border-2 border-slate-700 group-hover:border-blue-400 transition">
+              <div className="relative w-24 h-24 mb-4 rounded-full overflow-hidden border-2 border-slate-700 group-hover:border-blue-400 transition shadow-inner bg-slate-800">
                 <Image
                   src={m.image}
                   alt={m.name}
