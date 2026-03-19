@@ -11,7 +11,7 @@
 /* ── pdf-parse extractor ── */
 async function extractWithPdfParse(buffer) {
   try {
-    const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
+    const pdfParse = (await import("pdf-parse")).default;
     const result   = await pdfParse(buffer, { max: 0 }); // max:0 = all pages
     return result.text?.trim() || "";
   } catch (e) {
