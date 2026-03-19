@@ -1,3 +1,4 @@
+
 {
   "name": "mindmesh",
   "version": "0.1.0",
@@ -9,9 +10,6 @@
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint"
   },
-  "engines": {
-    "node": "22.x"
-  },
   "dependencies": {
     "@splinetool/react-spline": "^4.1.0",
     "@tanem/react-nprogress": "^6.0.3",
@@ -22,7 +20,6 @@
     "next": "16.1.6",
     "next-auth": "^4.24.13",
     "nodemailer": "^7.0.13",
-    "pdf-parse": "^1.1.4",
     "pdfreader": "^3.0.8",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -37,8 +34,5 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4"
-  },
-  "optionalDependencies": {
-    "lightningcss-linux-x64-gnu": "*"
   }
 }
