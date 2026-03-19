@@ -10,7 +10,10 @@ export async function PATCH(req) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { skillsToTeach, skillsToLearn, bio, subjects, domains, skillLevel, goal } = await req.json();
+    const {
+      skillsToTeach, skillsToLearn, bio, subjects, domains, skillLevel, goal,
+      branch, semester, year, rollNumber, institution
+    } = await req.json();
 
     await connectDB();
 
@@ -22,12 +25,17 @@ export async function PATCH(req) {
     if (domains !== undefined) updateFields.domains = domains;
     if (skillLevel !== undefined) updateFields.skillLevel = skillLevel;
     if (goal !== undefined) updateFields.goal = goal;
+    if (branch !== undefined) updateFields.branch = branch;
+    if (semester !== undefined) updateFields.semester = semester;
+    if (year !== undefined) updateFields.year = year;
+    if (rollNumber !== undefined) updateFields.rollNumber = rollNumber;
+    if (institution !== undefined) updateFields.institution = institution;
 
     const user = await User.findByIdAndUpdate(
       session.user.id,
       { $set: updateFields },
       { returnDocument: "after" }
-    ).select("name email profilePicture bio domains subjects skillLevel skillsToTeach skillsToLearn goal phone phoneVerified academicMetrics");
+    ).select("name email profilePicture bio domains subjects skillLevel skillsToTeach skillsToLearn goal phone phoneVerified academicMetrics branch semester year rollNumber institution");
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -47,7 +55,7 @@ export async function GET(req) {
     await connectDB();
 
     const user = await User.findById(session.user.id)
-      .select("name email profilePicture bio domains subjects skillLevel skillsToTeach skillsToLearn goal phone phoneVerified academicMetrics")
+      .select("name email profilePicture bio domains subjects skillLevel skillsToTeach skillsToLearn goal phone phoneVerified academicMetrics branch semester year rollNumber institution")
       .lean();
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });

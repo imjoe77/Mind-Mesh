@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useSession, signOut } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogOut, Menu, X, ChevronDown } from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const NAV_LINKS = [
@@ -23,6 +23,8 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const isDiscover = pathname === '/discover';
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 30);
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -33,9 +35,9 @@ export default function Header() {
 
   return (
     <>
-      <header className="fixed top-0 inset-x-0 z-50">
+      {/* On /discover: relative so it scrolls away. Everywhere else: fixed. */}
+      <header className={(isDiscover ? 'relative z-50' : 'fixed top-0 inset-x-0 z-50')}>
 
-        {/* ── Pill navbar container ── */}
         <div className="max-w-6xl mx-auto px-4 pt-5">
           <motion.div
             initial={false}
@@ -60,14 +62,14 @@ export default function Header() {
             {/* ── Logo ── */}
             <Link href="/" className="flex items-center gap-3 flex-shrink-0 group">
               <div className="relative w-14 h-14 rounded-full overflow-hidden shadow-lg shadow-sky-500/10 group-hover:scale-110 transition-transform duration-300">
-                <Image 
-                  src="/logo.png" 
-                  alt="MindMesh Logo" 
-                  fill 
-                  className="object-cover rounded-full" 
+                <Image
+                  src="/logo.png"
+                  alt="MindMesh Logo"
+                  fill
+                  className="object-cover rounded-full"
                 />
               </div>
-              <span 
+              <span
                 className="text-white text-[20px] font-black tracking-tight hidden sm:block"
                 style={{ fontFamily: "'Syne', sans-serif" }}
               >
@@ -166,7 +168,7 @@ export default function Header() {
             </div>
           </motion.div>
 
-          {/* ── Mobile dropdown (slides down from pill) ── */}
+          {/* ── Mobile dropdown ── */}
           <AnimatePresence>
             {menuOpen && (
               <motion.div
@@ -228,8 +230,8 @@ export default function Header() {
         </div>
       </header>
 
-      {/* push page content below the floating header */}
-      <div className="h-32 bg-[#1a2332]" />
+      {/* Spacer only on non-discover pages to push content below the fixed header */}
+      {!isDiscover && <div className="h-32 bg-[#1a2332]" />}
     </>
   );
 }

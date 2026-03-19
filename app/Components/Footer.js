@@ -1,118 +1,88 @@
 'use client';
 
-import Image from "next/image";
 import Link from 'next/link';
+import { motion } from 'framer-motion';
+import { Github, Twitter, Linkedin, MessageCircle, ArrowUp } from 'lucide-react';
+
+const SOCIALS = [
+  { label: 'Twitter',  icon: Twitter,       href: '#' },
+  { label: 'GitHub',   icon: Github,        href: '#' },
+  { label: 'LinkedIn', icon: Linkedin,      href: '#' },
+  { label: 'Discord',  icon: MessageCircle, href: '#' },
+];
+
+const LINKS = {
+  Platform:  ['Home', 'Dashboard', 'Discover', 'Groups'],
+  Resources: ['About Us', 'Community', 'Help Center', 'Developer API'],
+  Legal:     ['Privacy Policy', 'Terms of Service', 'Cookie Policy', 'Security'],
+};
 
 export default function Footer() {
-  const currentYear = new Date().getFullYear();
-
+  const year = new Date().getFullYear();
   return (
-    <footer className="bg-white border-t border-gray-100 overflow-hidden relative">
-      <div className="max-w-7xl mx-auto px-6 lg:px-10 py-16 lg:py-24">
-        
-        {/* Decorative background element */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50/30 rounded-full blur-3xl -mr-32 -mt-32" />
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 relative z-10">
-          
-          {/* Brand Identity */}
-          <div className="lg:col-span-2 space-y-6">
-            <Link href="/" className="flex items-center gap-3 group">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-all duration-300">
-                <span className="text-white text-lg font-bold">M</span>
+    <footer className="relative bg-[#060810] border-t border-white/[0.07] overflow-hidden">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-500/20 to-transparent" />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[200px] bg-sky-500/5 blur-[80px] rounded-full pointer-events-none" />
+
+      <div className="relative z-10 max-w-7xl mx-auto px-6 lg:px-10 pt-20 pb-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-12 mb-16">
+          <div className="lg:col-span-2 space-y-5">
+            <Link href="/" className="flex items-center gap-3 group w-fit">
+              <div className="w-14 h-14 rounded-full overflow-hidden shadow-lg shadow-sky-500/10 group-hover:scale-110 transition-transform duration-300">
+                <img src="/logo.png" alt="MindMesh Logo" className="w-full h-full object-cover rounded-full" />
               </div>
-              <span className="text-2xl font-black text-gray-900 tracking-tight">MindMesh</span>
+              <span className="text-xl font-black text-white tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>
+                MindMesh
+              </span>
             </Link>
-            
-            <p className="text-gray-500 text-[15px] leading-relaxed max-w-sm">
-              The peer-to-peer ecosystem where students connect, share knowledge, and master their academic journey together. Join thousands of student mentors today.
+            <p className="text-gray-500 text-[14px] leading-relaxed max-w-xs">
+              The peer-to-peer ecosystem where students connect, share knowledge, and master their academic journey together.
             </p>
-            
-            <div className="flex items-center gap-4">
-              {['Twitter', 'GitHub', 'LinkedIn', 'Discord'].map((social) => (
-                <button 
-                  key={social}
-                  className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-all duration-300"
-                  aria-label={social}
-                >
-                  <span className="sr-only">{social}</span>
-                  <div className="w-4 h-4 rounded-sm border-2 border-current opacity-30 group-hover:opacity-100" />
-                </button>
+            <div className="flex items-center gap-3">
+              {SOCIALS.map(({ label, icon: Icon, href }) => (
+                <a key={label} href={href} aria-label={label}
+                  className="w-8 h-8 rounded-lg border border-white/10 bg-white/[0.03] flex items-center justify-center text-gray-500 hover:text-sky-400 hover:border-sky-500/30 hover:bg-sky-500/5 transition-all duration-200">
+                  <Icon style={{ width: 14, height: 14 }} />
+                </a>
               ))}
             </div>
           </div>
 
-          {/* Navigation Links */}
-          <div className="space-y-6">
-            <h4 className="text-[13px] font-bold text-gray-900 uppercase tracking-widest">Platform</h4>
-            <ul className="space-y-4">
-              {['Home', 'Dashboard', 'Discover', 'Groups'].map((item) => (
-                <li key={item}>
-                  <Link href={item === 'Home' ? '/' : `/${item}`} className="text-gray-500 hover:text-blue-600 transition-colors text-[14px] font-medium">
-                    {item}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="space-y-6">
-            <h4 className="text-[13px] font-bold text-gray-900 uppercase tracking-widest">Resources</h4>
-            <ul className="space-y-4">
-              {['About Us', 'Community', 'Help Center', 'Developer API'].map((item) => (
-                <li key={item}>
-                  <Link href={`/${item.split(' ')[0]}`} className="text-gray-500 hover:text-blue-600 transition-colors text-[14px] font-medium">
-                    {item}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="space-y-6">
-            <h4 className="text-[13px] font-bold text-gray-900 uppercase tracking-widest">Support</h4>
-            <ul className="space-y-4">
-              {['Privacy Policy', 'Terms of Service', 'Cookie Policy', 'Security'].map((item) => (
-                <li key={item}>
-                  <Link href="/" className="text-gray-500 hover:text-blue-600 transition-colors text-[14px] font-medium">
-                    {item}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {Object.entries(LINKS).map(([heading, items]) => (
+            <div key={heading} className="space-y-5">
+              <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">{heading}</h4>
+              <ul className="space-y-3.5">
+                {items.map((item) => (
+                  <li key={item}>
+                    <Link href="/" className="text-gray-600 hover:text-gray-300 transition-colors text-[13px] font-medium">
+                      {item}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
-        {/* Divider and Bottom Section */}
-        <div className="mt-16 lg:mt-24 pt-10 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-3">
-            <Image
-              src="/logo.png"
-              alt="MindMesh Logo"
-              width={120}
-              height={40}
-              className="opacity-90 grayscale hover:grayscale-0 transition-all duration-500"
-            />
-            <div className="h-4 w-[1px] bg-gray-200 hidden md:block" />
-            <span className="text-gray-400 text-[13px] font-medium">
-              &copy; {currentYear} MindMesh. All rights reserved.
-            </span>
+        <div className="pt-8 border-t border-white/[0.07] flex flex-col md:flex-row justify-between items-center gap-5">
+          <div className="flex items-center gap-4">
+            <span className="text-white text-base font-black tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>MindMesh</span>
+            <div className="h-3.5 w-px bg-white/10" />
+            <span className="text-gray-600 text-[12px]">&copy; {year} MindMesh. All rights reserved.</span>
           </div>
-          
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[12px] text-gray-500 font-medium tracking-tight">Active: 1,248 Nodes</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-gray-600 text-[12px] font-medium">1,248 active nodes</span>
             </div>
-            
-            <button 
+            <motion.button
+              whileHover={{ scale: 1.1, y: -1 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              className="w-10 h-10 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-white hover:shadow-md transition-all duration-300"
+              className="w-8 h-8 rounded-full border border-white/10 bg-white/[0.03] flex items-center justify-center text-gray-500 hover:text-white hover:border-white/20 transition-all duration-200"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-              </svg>
-            </button>
+              <ArrowUp style={{ width: 14, height: 14 }} />
+            </motion.button>
           </div>
         </div>
       </div>

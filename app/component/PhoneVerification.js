@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { toast } from "react-toastify";
 
 export default function PhoneVerification() {
   const [phone, setPhone] = useState("")
@@ -45,14 +46,17 @@ export default function PhoneVerification() {
       const data = await res.json()
       if (res.ok) {
         setStep("otp-sent")
+        toast.info("Verification OTP sent!");
         // Demo mode: show the OTP
         if (data.demoOtp) setDemoOtp(data.demoOtp)
       } else {
         setError(data.error || "Failed to send OTP")
+        toast.error(data.error || "Failed to send OTP");
         setStep("idle")
       }
     } catch (err) {
       setError("Network error")
+      toast.error("Network error sending OTP");
       setStep("idle")
     }
   }
@@ -75,12 +79,15 @@ export default function PhoneVerification() {
         setStep("verified")
         setIsVerified(true)
         setDemoOtp("")
+        toast.success("Phone verified successfully!");
       } else {
         setError(data.error || "Verification failed")
+        toast.error(data.error || "Verification failed");
         setStep("otp-sent")
       }
     } catch (err) {
       setError("Network error")
+      toast.error("Network error verifying OTP");
       setStep("otp-sent")
     }
   }

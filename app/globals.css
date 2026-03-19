@@ -5,6 +5,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  background-color: #060810;
+  color: #f8fafc;
 }
 
 /* Custom scrollbar for dashboard panels */
@@ -26,4 +28,12 @@ body {
 ::selection {
   background: #c7d2fe;
   color: #312e81;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;    /* Firefox */
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "react-toastify";
 
 export default function ResultUploader({ onResultAnalyzed }) {
   const [isUploading, setIsUploading] = useState(false);
@@ -32,9 +33,11 @@ export default function ResultUploader({ onResultAnalyzed }) {
 
         const data = await res.json();
         if (res.ok && data.success) {
+          toast.success("Result analyzed and metrics updated!");
           onResultAnalyzed(data.metrics); // Refresh dashboard or show success
         } else {
           setError(data.error || "Failed to analyze result");
+          toast.error(data.error || "Failed to analyze result");
         }
         setIsUploading(false);
       };
@@ -43,6 +46,7 @@ export default function ResultUploader({ onResultAnalyzed }) {
     } catch (err) {
       console.error(err);
       setError("Network or parsing error occurred");
+      toast.error("Network or parsing error occurred");
       setIsUploading(false);
     }
   };
