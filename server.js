@@ -8,8 +8,9 @@ import { Server as SocketIOServer } from "socket.io";
 import mongoose from "mongoose";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
-const port = parseInt(process.env.PORT || "3000", 10);
+const port = process.env.PORT || 10000; // Render uses port 10000 by default
+const hostname = "0.0.0.0"; // Allow external connections
+
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
