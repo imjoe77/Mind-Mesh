@@ -275,21 +275,67 @@ export default function Hero() {
         </motion.div>
       </motion.div>
 
-      {/* ── scroll caret ── */}
+      {/* ── scroll indicator ── */}
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1.3 }}
-        className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.4, duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-3"
       >
-        <span className="text-gray-600 text-[9px] uppercase tracking-[0.2em] font-semibold">Scroll</span>
-        <div className="w-px h-10 bg-gray-800 overflow-hidden">
+        {/* label */}
+        <motion.span
+          animate={{ opacity: [0.4, 0.8, 0.4] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+          className="text-[9px] uppercase tracking-[0.25em] font-bold text-gray-600"
+        >
+          Scroll
+        </motion.span>
+
+        {/* mouse shell */}
+        <div className="relative flex items-center justify-center">
+          {/* outer pulse ring 1 */}
           <motion.div
-            className="w-full rounded-full bg-sky-400"
-            animate={{ y: ['-100%', '100%'] }}
-            transition={{ duration: 1.3, repeat: Infinity, ease: 'easeIn' }}
-            style={{ height: '50%' }}
+            className="absolute w-10 h-10 rounded-full border border-sky-400/20"
+            animate={{ scale: [1, 1.6], opacity: [0.4, 0] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
           />
+          {/* outer pulse ring 2 — offset */}
+          <motion.div
+            className="absolute w-10 h-10 rounded-full border border-sky-400/15"
+            animate={{ scale: [1, 1.9], opacity: [0.3, 0] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut', delay: 0.4 }}
+          />
+
+          {/* mouse body */}
+          <div className="relative w-[26px] h-[38px] rounded-[13px] border-2 border-white/[0.15] bg-white/[0.03] backdrop-blur-sm flex items-start justify-center pt-[6px] overflow-hidden">
+            {/* inner glow */}
+            <div className="absolute inset-0 rounded-[13px] bg-gradient-to-b from-sky-400/[0.06] to-transparent pointer-events-none" />
+
+            {/* scroll wheel dot */}
+            <motion.div
+              className="w-[3px] rounded-full bg-sky-400"
+              style={{ boxShadow: '0 0 6px rgba(56,189,248,0.8)' }}
+              animate={{ y: [0, 10, 0], opacity: [1, 0.2, 1], height: ['6px', '3px', '6px'] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+            />
+          </div>
+        </div>
+
+        {/* chevrons */}
+        <div className="flex flex-col items-center gap-[3px]">
+          {[0, 1, 2].map(i => (
+            <motion.div
+              key={i}
+              className="w-[10px] h-[10px] border-r-[1.5px] border-b-[1.5px] border-sky-400/60 rotate-45"
+              animate={{ opacity: [0, 1, 0], y: [0, 3, 0] }}
+              transition={{
+                duration: 1.4,
+                repeat: Infinity,
+                ease: 'easeInOut',
+                delay: i * 0.18,
+              }}
+            />
+          ))}
         </div>
       </motion.div>
 
