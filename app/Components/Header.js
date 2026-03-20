@@ -1,127 +1,235 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useSession, signOut } from 'next-auth/react';
+import { usePathname } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import { LogOut, Menu, X, ChevronDown } from 'lucide-react';
+import NotificationBell from './NotificationBell';
+
+const NAV_LINKS = [
+  { label: 'Home',     href: '/Home' },
+  { label: 'Profile',  href: '/SDash' },
+  { label: 'About',    href: '/About' },
+  { label: 'Discover', href: '/discover' },
+  { label: 'Groups',   href: '/groups' },
+];
+
 export default function Header() {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 30);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  if (pathname === '/Login') return null;
+
   return (
-    <header
-      className={`sticky top-0 z-50 transition-all duration-500 
-      ${scrolled
-        ? "bg-white/70 backdrop-blur-xl border-b border-gray-200 shadow-md"
-        : "bg-white border-b border-gray-200"}
-      `}
-    >
-      <nav className="max-w-7xl mx-auto px-6 lg:px-10 py-4 flex justify-between items-center">
+    <>
+      <header className="fixed top-0 inset-x-0 z-50">
 
-        {/* Logo */}
-        <div className="flex items-center gap-3 group">
-          <Image
-            src="/logo.jpeg"
-            alt="Mind Mesh Logo"
-            width={150}
-            height={40}
-            className="rounded-full shadow-sm transition-transform duration-300 group-hover:scale-110"
-          />
-          {/* Brand text appears only after scroll */}
-          <span
-            className={`overflow-hidden transition-[max-width,opacity,transform] duration-500 ease-out ${
-              scrolled
-                ? "max-w-xs opacity-100 translate-y-0"
-                : "max-w-0 opacity-0 translate-y-1"
-            }`}
+        {/* ── Pill navbar container ── */}
+        <div className="max-w-6xl mx-auto px-4 pt-5">
+          <motion.div
+            initial={false}
+            animate={scrolled ? 'scrolled' : 'top'}
+            variants={{
+              top: {
+                backgroundColor: 'rgba(15,22,36,0.8)',
+                borderColor: 'rgba(255,255,255,0.15)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              },
+              scrolled: {
+                backgroundColor: 'rgba(9,12,22,0.92)',
+                borderColor: 'rgba(56,189,248,0.25)',
+                boxShadow: '0 12px 50px rgba(0,0,0,0.6), 0 0 15px rgba(56,189,248,0.1)',
+              },
+            }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="flex items-center justify-between h-16 px-5 rounded-2xl border"
+            style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}
           >
-            <span className="inline-block text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent border-b-2 border-blue-500/80 pb-0.5">
-              Mind Mesh
-            </span>
-          </span>
-        </div>
 
-        {/* Menu */}
-        <ul className="hidden md:flex items-center gap-10 text-sm font-medium text-gray-600">
-             <li>
-            <a href="/Home" className="hover:text-blue-600 transition">
-              Home
-            </a>
-          </li>
-          <li>
-            <a href="#features" className="hover:text-blue-600 transition">
-              Features
-            </a>
-          </li>
-
-          <li>
-            <a href="/About" className="hover:text-blue-600 transition">
-              About
-            </a>
-          </li>
-
-          <li>
-            <a href="#contact" className="hover:text-blue-600 transition">
-              Contact
-            </a>
-          </li>
-
-          <li>
-            <button className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-2.5 rounded-lg shadow-md hover:shadow-lg hover:-translate-y-0.5 transition">
-              Get Started
-            </button>
-          </li>
-        </ul>
-
-          {/* Mobile hamburger */}
-          <button
-            onClick={handleMenuToggle}
-            className="md:hidden text-gray-700"
-            aria-label="Open menu"
-          >
-            <svg
-              className="w-7 h-7"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
-
-          {/* Login */}
-          <a
-            href="/Login"
-            className="hidden sm:inline-flex items-center justify-center px-5 py-2 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 shadow-md hover:shadow-lg hover:from-blue-500 hover:to-indigo-500 transition-all"
-          >
-            Login
-          </a>
-
-        </div>
-      </nav>
-
-      {/* Mobile menu */}
-      {menuOpen && (
-        <div className="md:hidden bg-white/90 backdrop-blur border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex flex-col gap-3 text-sm font-semibold text-gray-700">
-              <a href="/Home" onClick={handleMenuItemClick} className="hover:text-blue-600">
-                Home
-              </a>
-              <a href="/About" onClick={handleMenuItemClick} className="hover:text-blue-600">
-                About
-              </a>
-              <a href="#contact" onClick={handleMenuItemClick} className="hover:text-blue-600">
-                Contact
-              </a>
-              <button
-                onClick={handleMenuItemClick}
-                className="mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-5 py-2 rounded-full shadow-md w-fit"
+            {/* ── Logo ── */}
+            <Link href="/" className="flex items-center gap-3 flex-shrink-0 group">
+              <div className="relative w-14 h-14 rounded-full overflow-hidden shadow-lg shadow-sky-500/10 group-hover:scale-110 transition-transform duration-300">
+                <Image 
+                  src="/logo.png" 
+                  alt="MindMesh Logo" 
+                  fill 
+                  className="object-cover rounded-full" 
+                />
+              </div>
+              <span 
+                className="text-white text-[20px] font-black tracking-tight hidden sm:block"
+                style={{ fontFamily: "'Syne', sans-serif" }}
               >
-                Get Started
+                MindMesh
+              </span>
+            </Link>
+
+            {/* ── Desktop pill nav ── */}
+            <nav className="hidden md:flex items-center gap-0.5 bg-white/[0.06] border border-white/[0.09] rounded-xl px-1.5 py-1.5">
+              {NAV_LINKS.map(({ label, href }) => {
+                const active = pathname === href;
+                return (
+                  <Link key={href} href={href} className="relative">
+                    {active && (
+                      <motion.div
+                        layoutId="nav-pill"
+                        className="absolute inset-0 rounded-lg bg-white/[0.1] border border-white/[0.1]"
+                        transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                      />
+                    )}
+                    <span
+                      className={`relative z-10 block px-3.5 py-1.5 rounded-lg text-[13px] font-semibold transition-colors duration-150 ${
+                        active ? 'text-white' : 'text-gray-200 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </nav>
+
+            {/* ── Right actions ── */}
+            <div className="flex items-center gap-2">
+              {session ? (
+                <>
+                  <NotificationBell />
+                  <Link href="/SDash" className="hidden sm:block">
+                    <Image
+                      src={session?.user?.image || '/default-avatar.png'}
+                      alt="Profile"
+                      width={32}
+                      height={32}
+                      className="rounded-full border border-white/10 object-cover hover:scale-105 transition-transform duration-200"
+                    />
+                  </Link>
+                  <button
+                    onClick={() => signOut({ callbackUrl: '/Login' })}
+                    className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold text-gray-400 bg-white/[0.04] border border-white/[0.06] hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 transition-all duration-200"
+                  >
+                    <LogOut style={{ width: 12, height: 12 }} />
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/Login"
+                    className="hidden sm:inline-flex px-3.5 py-1.5 rounded-lg text-[13px] font-semibold text-gray-200 hover:text-white hover:bg-white/[0.06] transition-all duration-200"
+                  >
+                    Login
+                  </Link>
+                  <Link href="/Home">
+                    <motion.button
+                      whileHover={{ scale: 1.04 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="hidden sm:inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[13px] font-bold text-white bg-gradient-to-r from-sky-500 to-indigo-600 shadow-md shadow-sky-500/20 hover:shadow-sky-500/30 transition-shadow duration-200"
+                    >
+                      Get Started
+                    </motion.button>
+                  </Link>
+                </>
+              )}
+
+              {/* hamburger */}
+              <button
+                onClick={() => setMenuOpen(o => !o)}
+                className="md:hidden w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.07] transition-all duration-200"
+                aria-label="Toggle menu"
+              >
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.div
+                    key={menuOpen ? 'close' : 'open'}
+                    initial={{ opacity: 0, rotate: -90, scale: 0.7 }}
+                    animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                    exit={{ opacity: 0, rotate: 90, scale: 0.7 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {menuOpen
+                      ? <X style={{ width: 17, height: 17 }} />
+                      : <Menu style={{ width: 17, height: 17 }} />
+                    }
+                  </motion.div>
+                </AnimatePresence>
               </button>
             </div>
-          </div>
+          </motion.div>
+
+          {/* ── Mobile dropdown (slides down from pill) ── */}
+          <AnimatePresence>
+            {menuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scaleY: 0.95 }}
+                animate={{ opacity: 1, y: 0, scaleY: 1 }}
+                exit={{ opacity: 0, y: -6, scaleY: 0.95 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                style={{ transformOrigin: 'top', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}
+                className="md:hidden mt-1.5 rounded-2xl border border-white/[0.08] bg-[#060810]/90 overflow-hidden"
+              >
+                <div className="p-3 flex flex-col gap-0.5">
+                  {NAV_LINKS.map(({ label, href }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMenuOpen(false)}
+                      className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 ${
+                        pathname === href
+                          ? 'text-white bg-white/[0.08]'
+                          : 'text-gray-400 hover:text-white hover:bg-white/[0.05]'
+                      }`}
+                    >
+                      {label}
+                    </Link>
+                  ))}
+
+                  <div className="mt-2 pt-2 border-t border-white/[0.06] flex flex-col gap-1.5">
+                    {session ? (
+                      <button
+                        onClick={() => { setMenuOpen(false); signOut({ callbackUrl: '/Login' }); }}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-red-400 hover:bg-red-500/10 transition-all duration-150"
+                      >
+                        <LogOut style={{ width: 14, height: 14 }} />
+                        Logout
+                      </button>
+                    ) : (
+                      <>
+                        <Link
+                          href="/Login"
+                          onClick={() => setMenuOpen(false)}
+                          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/[0.05] transition-all duration-150"
+                        >
+                          Login
+                        </Link>
+                        <Link
+                          href="/Home"
+                          onClick={() => setMenuOpen(false)}
+                          className="px-4 py-2.5 rounded-xl text-sm font-bold text-white text-center bg-gradient-to-r from-sky-500 to-indigo-600"
+                        >
+                          Get Started
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      )}
-    </header>
+      </header>
+
+      {/* push page content below the floating header */}
+      <div className="h-32 bg-[#1a2332]" />
+    </>
   );
 }

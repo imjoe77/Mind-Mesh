@@ -1,33 +1,67 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { motion, useInView, AnimatePresence } from "framer-motion";
+import {
+  ArrowLeft, Calendar, MessageSquare, Users,
+  Clock, Trash2, LogOut, Crown, Send, Tag, Radio,
+} from "lucide-react";
+import { toast } from "react-toastify";
 
+/* ── helpers ──────────────────────────────────────────────────── */
 function toLocalDateStr(d) {
   const dd = new Date(d);
   return `${dd.getFullYear()}-${String(dd.getMonth() + 1).padStart(2, "0")}-${String(dd.getDate()).padStart(2, "0")}`;
 }
 
-function nowTimeStr() {
-  const n = new Date();
-  return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`;
+/* ── glass card ─────────────────────────────────────────────── */
+function GlassCard({ children, className = "" }) {
+  return (
+    <div className={`relative rounded-2xl border border-white/[0.07] bg-white/[0.025] overflow-hidden ${className}`}>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+      {children}
+    </div>
+  );
 }
 
+/* ── section head ───────────────────────────────────────────── */
+function SectionHead({ icon: Icon, label, accent = "sky" }) {
+  const colors = {
+    sky:    "bg-sky-500/10 text-sky-400 border-sky-500/20",
+    indigo: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+  };
+  return (
+    <div className="flex items-center gap-3 mb-6">
+      <div className={`w-9 h-9 rounded-xl border flex items-center justify-center flex-shrink-0 ${colors[accent]}`}>
+        <Icon style={{ width: 16, height: 16 }} />
+      </div>
+      <h2 className="text-lg font-black text-white tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>
+        {label}
+      </h2>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MAIN PAGE
+══════════════════════════════════════════════════════════════ */
 export default function GroupDetailPage() {
   const { groupId } = useParams();
   const { data: session } = useSession();
   const router = useRouter();
 
-  const [group, setGroup] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const [joining, setJoining] = useState(false);
-  const [leaving, setLeaving] = useState(false);
-  const [slotAction, setSlotAction] = useState({}); // { [sessionId]: 'joining'|'leaving' }
+  const [group,         setGroup]         = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState("");
+  const [joining,       setJoining]       = useState(false);
+  const [leaving,       setLeaving]       = useState(false);
+  const [slotAction,    setSlotAction]    = useState({});
   const [addingComment, setAddingComment] = useState(false);
 
+  /* ── all original logic untouched ────────────────────────── */
   useEffect(() => { fetchGroup(); }, [groupId]);
 
   const fetchGroup = async (quiet = false) => {
@@ -37,11 +71,8 @@ export default function GroupDetailPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load group");
       setGroup(data.group);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      if (!quiet) setLoading(false);
-    }
+    } catch (err) { setError(err.message); }
+    finally { if (!quiet) setLoading(false); }
   };
 
   const handleJoin = async () => {
@@ -51,7 +82,8 @@ export default function GroupDetailPage() {
       const res = await fetch(`/api/groups/${groupId}/join`, { method: "POST" });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join"); }
       await fetchGroup();
-    } catch (err) { alert(err.message); }
+      toast.success("Joined group successfully!");
+    } catch (err) { toast.error(err.message); }
     finally { setJoining(false); }
   };
 
@@ -61,40 +93,41 @@ export default function GroupDetailPage() {
       const res = await fetch(`/api/groups/${groupId}/leave`, { method: "POST" });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to leave"); }
       await fetchGroup();
-    } catch (err) { alert(err.message); }
+      toast.success("You have left the group.");
+    } catch (err) { toast.error(err.message); }
     finally { setLeaving(false); }
   };
 
-  // Member: join an individual slot
   const handleJoinSlot = async (sessionId) => {
-    setSlotAction((p) => ({ ...p, [sessionId]: "joining" }));
+    setSlotAction(p => ({ ...p, [sessionId]: "joining" }));
     try {
       const res = await fetch(`/api/groups/${groupId}/sessions/${sessionId}/join`, { method: "POST" });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join slot"); }
-      await fetchGroup(true); // quiet refresh
-    } catch (err) { alert(err.message); }
-    finally { setSlotAction((p) => ({ ...p, [sessionId]: null })); }
+      await fetchGroup(true);
+      toast.success("Joined session slot!");
+    } catch (err) { toast.error(err.message); }
+    finally { setSlotAction(p => ({ ...p, [sessionId]: null })); }
   };
 
-  // Member: leave a slot
   const handleLeaveSlot = async (sessionId) => {
-    setSlotAction((p) => ({ ...p, [sessionId]: "leaving" }));
+    setSlotAction(p => ({ ...p, [sessionId]: "leaving" }));
     try {
       const res = await fetch(`/api/groups/${groupId}/sessions/${sessionId}/join`, { method: "DELETE" });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to leave slot"); }
-      await fetchGroup(true); // quiet refresh
-    } catch (err) { alert(err.message); }
-    finally { setSlotAction((p) => ({ ...p, [sessionId]: null })); }
+      await fetchGroup(true);
+      toast.success("Left session slot.");
+    } catch (err) { toast.error(err.message); }
+    finally { setSlotAction(p => ({ ...p, [sessionId]: null })); }
   };
 
-  // Owner: delete a slot
   const handleDeleteSlot = async (sessionId) => {
     if (!confirm("Remove this session slot?")) return;
     try {
       const res = await fetch(`/api/groups/${groupId}/sessions?sessionId=${sessionId}`, { method: "DELETE" });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to delete slot"); }
-      await fetchGroup(true); // quiet refresh
-    } catch (err) { alert(err.message); }
+      await fetchGroup(true);
+      toast.success("Session slot removed.");
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleAddComment = async (e) => {
@@ -109,265 +142,399 @@ export default function GroupDetailPage() {
       });
       if (!res.ok) throw new Error("Failed to post comment");
       e.target.reset();
-      await fetchGroup(true); // quiet refresh
-    } catch (err) { alert(err.message); }
+      await fetchGroup(true);
+      toast.success("Comment posted!");
+    } catch (err) { toast.error(err.message); }
     finally { setAddingComment(false); }
   };
+  /* ── end logic ──────────────────────────────────────────── */
 
-  if (loading) return <div className="p-8 text-center text-slate-400 animate-pulse">Loading group details...</div>;
-  if (error || !group) return <div className="p-8 text-center text-red-400 bg-red-900/20 max-w-lg mx-auto rounded-xl mt-12 border border-red-800">{error || "Group not found"}</div>;
+  /* ── loading ─────────────────────────────────────────────── */
+  if (loading) return (
+    <div className="min-h-screen bg-[#060810] flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-9 h-9 border-2 border-sky-500/20 border-t-sky-500 rounded-full animate-spin" />
+        <p className="text-gray-600 text-xs uppercase tracking-widest">Loading...</p>
+      </div>
+    </div>
+  );
 
-  const userId = session?.user?.id;
+  /* ── error ───────────────────────────────────────────────── */
+  if (error || !group) return (
+    <div className="min-h-screen bg-[#060810] flex items-center justify-center p-6">
+      <GlassCard className="max-w-sm w-full p-8 text-center border-rose-500/20">
+        <Radio className="mx-auto text-rose-400 mb-3" style={{ width: 28, height: 28 }} />
+        <p className="text-white font-bold mb-1">Group not found</p>
+        <p className="text-gray-500 text-sm mb-5">{error || "This group may have been removed."}</p>
+        <button onClick={() => router.push("/groups")}
+          className="px-5 py-2.5 rounded-xl bg-white/[0.05] border border-white/[0.08] text-gray-300 text-sm font-semibold hover:text-white transition-colors">
+          Back to Groups
+        </button>
+      </GlassCard>
+    </div>
+  );
+
+  const userId   = session?.user?.id;
   const isMember = session && (group.members || []).some(m => String(m._id) === String(userId));
-  const isOwner = session && String(group.owner._id) === String(userId);
-  const inputCls = "bg-slate-950 border border-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-colors";
-
-  // Separate windows and slots
-  const windows = (group.sessions || []).filter(s => !s.isSlot);
-  const slots = (group.sessions || []).filter(s => s.isSlot);
+  const isOwner  = session && String(group.owner._id) === String(userId);
+  const fillPct  = Math.round(((group.members || []).length / group.maxMembers) * 100);
+  const subjectHue = ((group.subject?.charCodeAt(0) || 200) * 37) % 360;
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4 grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="min-h-screen bg-[#060810] text-gray-100">
 
-      {/* ── Sidebar ── */}
-      <div className="lg:col-span-1 space-y-6">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 blur-3xl -mr-10 -mt-10 rounded-full" />
+      {/* ambient blobs */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-1/4 w-[600px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.05)_0%,transparent_70%)]" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[400px] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.05)_0%,transparent_70%)]" />
+      </div>
 
-          <div className="flex justify-between items-start mb-4">
-            <span className="inline-flex text-xs font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-              {group.subject}
-            </span>
-          </div>
+      <div className="relative z-10 max-w-6xl mx-auto px-4 lg:px-8 py-10">
 
-          <h1 className="text-2xl font-bold text-white mb-2 leading-tight">{group.name}</h1>
-          <p className="text-slate-400 text-sm mb-6 leading-relaxed">{group.description || "No description provided."}</p>
+        {/* back */}
+        <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.4 }}>
+          <Link href="/groups"
+            className="inline-flex items-center gap-2 text-gray-500 hover:text-white transition-colors mb-8 group text-sm font-semibold">
+            <ArrowLeft style={{ width: 15, height: 15 }} className="group-hover:-translate-x-0.5 transition-transform" />
+            Back to Groups
+          </Link>
+        </motion.div>
 
-          <div className="flex items-center gap-3 mb-6 p-4 bg-slate-950 rounded-xl border border-slate-800">
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-300">{group.owner.name?.charAt(0)}</div>
-            <div>
-              <p className="text-xs text-slate-500 uppercase font-semibold tracking-wider">Host</p>
-              <p className="text-sm font-medium text-slate-200">{group.owner.name}</p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-          <div className="mb-6 flex items-center justify-between text-sm">
-            <span className="text-slate-400 font-medium">Members</span>
-            <span className="text-slate-200 bg-slate-800 px-2 py-1 rounded-md font-mono text-xs border border-slate-700">
-              {(group.members || []).length} / {group.maxMembers}
-            </span>
-          </div>
+          {/* ══════════════════════════
+              SIDEBAR
+          ══════════════════════════ */}
+          <div className="lg:col-span-4 space-y-4">
 
-          <div>
-            {!session ? (
-              <button onClick={() => router.push("/Login")} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all">Sign in to join</button>
-            ) : isOwner ? (
-              <div className="w-full py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-medium text-center text-sm">You own this group</div>
-            ) : isMember ? (
-              <button disabled={leaving} onClick={handleLeave} className="w-full py-3 rounded-xl bg-red-900/50 hover:bg-red-800/80 text-red-200 border border-red-800 font-medium transition-colors disabled:opacity-50">
-                {leaving ? "Leaving..." : "Leave Group"}
-              </button>
-            ) : (group.members || []).length >= group.maxMembers ? (
-              <div className="w-full py-3 rounded-xl bg-slate-800 text-slate-500 font-medium text-center">Group is full</div>
-            ) : (
-              <button disabled={joining} onClick={handleJoin} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all disabled:opacity-50">
-                {joining ? "Joining..." : "Join Study Group"}
-              </button>
+            {/* identity card */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.22,1,0.36,1] }}>
+              <GlassCard className="p-6">
+                {/* subject accent bar */}
+                <div className="absolute left-0 top-8 bottom-8 w-[3px] rounded-full opacity-60"
+                  style={{ background: `hsl(${subjectHue},65%,55%)` }} />
+
+                <div className="pl-3 space-y-4">
+                  <span className="inline-block text-[10px] font-black uppercase tracking-[0.22em] px-3 py-1 rounded-full border"
+                    style={{
+                      color: `hsl(${subjectHue},65%,65%)`,
+                      borderColor: `hsl(${subjectHue},60%,38%)`,
+                      background: `hsl(${subjectHue},65%,10%)`,
+                    }}>
+                    {group.subject}
+                  </span>
+
+                  <h1 className="text-2xl font-black text-white leading-snug tracking-tight"
+                    style={{ fontFamily: "'Syne', sans-serif" }}>
+                    {group.name}
+                  </h1>
+
+                  <p className="text-gray-500 text-sm leading-relaxed">
+                    {group.description || "No description provided."}
+                  </p>
+
+                  {/* owner */}
+                  <div className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm flex-shrink-0">
+                      {group.owner.name?.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-600 uppercase font-bold tracking-widest flex items-center gap-1">
+                        <Crown style={{ width: 9, height: 9 }} className="text-amber-400" /> Owner
+                      </p>
+                      <p className="text-sm font-bold text-gray-200">{group.owner.name}</p>
+                    </div>
+                  </div>
+
+                  {/* member bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-bold text-gray-600 uppercase tracking-widest">
+                      <span className="flex items-center gap-1.5"><Users style={{ width: 11, height: 11 }} />Members</span>
+                      <span className={fillPct >= 100 ? "text-amber-400" : "text-gray-400"}>
+                        {(group.members || []).length} / {group.maxMembers}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-white/[0.05] rounded-full overflow-hidden">
+                      <motion.div className="h-full rounded-full"
+                        style={{ background: fillPct >= 100 ? "#f59e0b" : "#6366f1" }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${fillPct}%` }}
+                        transition={{ duration: 0.9, ease: "easeOut" }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* CTA */}
+                  {!session ? (
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      onClick={() => router.push("/Login")}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-sm shadow-lg shadow-sky-500/15">
+                      Sign in to Join
+                    </motion.button>
+                  ) : isOwner ? (
+                    <div className="w-full py-3 rounded-xl bg-amber-500/[0.07] border border-amber-500/20 text-amber-400 font-bold text-xs uppercase tracking-widest text-center flex items-center justify-center gap-2">
+                      <Crown style={{ width: 13, height: 13 }} /> You own this group
+                    </div>
+                  ) : isMember ? (
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      disabled={leaving} onClick={handleLeave}
+                      className="w-full py-3 rounded-xl bg-rose-500/[0.07] border border-rose-500/20 text-rose-400 font-bold text-sm flex items-center justify-center gap-2 hover:bg-rose-500/[0.12] transition-all disabled:opacity-40">
+                      <LogOut style={{ width: 14, height: 14 }} />
+                      {leaving ? "Leaving..." : "Leave Group"}
+                    </motion.button>
+                  ) : (group.members || []).length >= group.maxMembers ? (
+                    <div className="w-full py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] text-gray-600 font-bold text-xs text-center">
+                      Group Full
+                    </div>
+                  ) : (
+                    <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                      disabled={joining} onClick={handleJoin}
+                      className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-sm shadow-lg shadow-sky-500/15 disabled:opacity-40">
+                      {joining ? "Joining..." : "Join Study Group"}
+                    </motion.button>
+                  )}
+                </div>
+              </GlassCard>
+            </motion.div>
+
+            {/* tags */}
+            {(group.tags || []).length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
+                <GlassCard className="p-4">
+                  <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <Tag style={{ width: 10, height: 10 }} /> Tags
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {group.tags.map(t => (
+                      <span key={t} className="text-[11px] px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.07] text-gray-500 hover:text-gray-300 transition-colors cursor-default">
+                        #{t}
+                      </span>
+                    ))}
+                  </div>
+                </GlassCard>
+              </motion.div>
             )}
+
+            {/* members list */}
+            {(group.members || []).length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }}>
+                <GlassCard className="p-4">
+                  <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                    <Users style={{ width: 10, height: 10 }} /> Members ({(group.members || []).length})
+                  </p>
+                  <div className="space-y-2.5">
+                    {(group.members || []).slice(0, 6).map(m => (
+                      <div key={m._id} className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500/30 to-indigo-600/30 border border-white/[0.08] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                          {m.name?.charAt(0)}
+                        </div>
+                        <span className="text-gray-400 text-xs font-medium truncate">{m.name}</span>
+                        {String(m._id) === String(group.owner._id) && (
+                          <Crown className="text-amber-400 ml-auto flex-shrink-0" style={{ width: 11, height: 11 }} />
+                        )}
+                      </div>
+                    ))}
+                    {(group.members || []).length > 6 && (
+                      <p className="text-gray-700 text-xs">+{(group.members || []).length - 6} more</p>
+                    )}
+                  </div>
+                </GlassCard>
+              </motion.div>
+            )}
+          </div>
+
+          {/* ══════════════════════════
+              MAIN CONTENT
+          ══════════════════════════ */}
+          <div className="lg:col-span-8 space-y-5">
+
+            {/* sessions */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.05, ease: [0.22,1,0.36,1] }}>
+              <GlassCard className="p-6">
+                <SectionHead icon={Calendar} label="Study Sessions" accent="sky" />
+
+                {(group.sessions || []).length === 0 ? (
+                  <div className="py-14 text-center rounded-xl border border-dashed border-white/[0.07]">
+                    <Calendar className="mx-auto text-gray-700 mb-2" style={{ width: 26, height: 26 }} />
+                    <p className="text-gray-600 text-sm">No sessions scheduled yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {(group.sessions || []).map((s) => {
+                      const dateStr      = toLocalDateStr(new Date(s.date));
+                      const now          = new Date();
+                      const sessionStart = new Date(`${dateStr}T${s.startTime}:00`);
+                      const sessionEnd   = new Date(`${dateStr}T${s.endTime}:00`);
+                      const isPast       = sessionEnd < now;
+                      const isInProgress = now >= sessionStart && now <= sessionEnd;
+                      const dbStatus     = s.status || "scheduled";
+                      const isLive       = dbStatus === "active" || isInProgress;
+                      const hasJoined    = (s.participants || []).some(p => {
+                        const pId = p?._id ? String(p._id) : String(p);
+                        return pId === String(userId);
+                      });
+                      const acting = slotAction[s._id];
+
+                      return (
+                        <div key={s._id}
+                          className={`relative rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-4 overflow-hidden transition-all duration-200 ${
+                            isPast || dbStatus === "completed"
+                              ? "border-white/[0.04] bg-white/[0.01] opacity-40"
+                              : isLive
+                              ? "border-emerald-500/30 bg-emerald-500/[0.04]"
+                              : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]"
+                          }`}
+                        >
+                          {isLive && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-emerald-400 animate-pulse rounded-l-xl" />}
+
+                          {/* date + time */}
+                          <div className="flex-1 pl-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                                isLive ? "text-emerald-400" : isPast ? "text-gray-700" : "text-sky-400"
+                              }`}>
+                                {new Date(s.date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+                              </span>
+                              {(isPast || dbStatus === "completed") && (
+                                <span className="text-[9px] bg-white/[0.04] text-gray-600 px-2 py-0.5 rounded-full border border-white/[0.06]">Completed</span>
+                              )}
+                              {isLive && (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-black">
+                                  <span className="w-1 h-1 rounded-full bg-white animate-ping inline-block" /> LIVE
+                                </span>
+                              )}
+                              {!isPast && !isLive && dbStatus === "scheduled" && (
+                                <span className="text-[9px] bg-sky-500/[0.08] text-sky-500 border border-sky-500/20 px-2 py-0.5 rounded-full">Scheduled</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-white font-black font-mono text-base">
+                              <Clock style={{ width: 12, height: 12 }} className="text-gray-600 flex-shrink-0" />
+                              {s.startTime}
+                              <span className="text-gray-700 font-sans text-xs">→</span>
+                              {s.endTime}
+                            </div>
+                            {s.note && <p className="text-xs text-gray-600 mt-1">{s.note}</p>}
+                          </div>
+
+                          {/* participants */}
+                          <div className="flex items-center gap-1.5 text-xs text-gray-600 flex-shrink-0">
+                            <Users style={{ width: 11, height: 11 }} />
+                            {s.participants?.length ?? 0} joined
+                          </div>
+
+                          {/* actions */}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {isOwner && !isPast && (
+                              <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
+                                onClick={() => handleDeleteSlot(s._id)}
+                                className="w-8 h-8 rounded-lg bg-rose-500/[0.07] border border-rose-500/20 text-rose-500 flex items-center justify-center hover:bg-rose-500/20 transition-all">
+                                <Trash2 style={{ width: 12, height: 12 }} />
+                              </motion.button>
+                            )}
+
+                            {isMember && !isOwner && !isPast && (
+                              hasJoined ? (
+                                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                                  onClick={() => handleLeaveSlot(s._id)} disabled={acting === "leaving"}
+                                  className="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-gray-500 text-xs font-semibold hover:text-rose-400 hover:border-rose-500/20 transition-all disabled:opacity-40">
+                                  Leave Slot
+                                </motion.button>
+                              ) : (
+                                <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                                  onClick={() => handleJoinSlot(s._id)} disabled={acting === "joining"}
+                                  className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-all disabled:opacity-40">
+                                  Join Slot
+                                </motion.button>
+                              )
+                            )}
+
+                            {hasJoined && !isPast && (
+                              <span className="text-[9px] bg-emerald-500/[0.07] border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
+                                You&apos;re in
+                              </span>
+                            )}
+
+                            {isLive && (isMember || isOwner) && (
+                              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
+                                onClick={() => router.push(`/groups/${groupId}/session/${s._id}`)}
+                                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-black shadow-lg shadow-emerald-500/20 transition-all">
+                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping inline-block" />
+                                Enter Room
+                              </motion.button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </GlassCard>
+            </motion.div>
+
+            {/* discussion */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1, ease: [0.22,1,0.36,1] }}>
+              <GlassCard className="p-6">
+                <SectionHead icon={MessageSquare} label="Discussion" accent="indigo" />
+
+                <div className="space-y-3 mb-5 max-h-[400px] overflow-y-auto pr-1"
+                  style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.07) transparent" }}>
+                  {(group.comments || []).length === 0 ? (
+                    <div className="py-14 text-center rounded-xl border border-dashed border-white/[0.07]">
+                      <MessageSquare className="mx-auto text-gray-700 mb-2" style={{ width: 26, height: 26 }} />
+                      <p className="text-gray-600 text-sm">Be the first to start the conversation.</p>
+                    </div>
+                  ) : (
+                    group.comments.map((c, i) => (
+                      <motion.div key={c._id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.03 }}
+                        className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.09] transition-all"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500/30 to-indigo-600/30 border border-white/[0.08] flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                          {c.author?.name?.charAt(0) || "U"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold text-gray-300">{c.author?.name || "Anonymous"}</span>
+                            <span className="text-[10px] text-gray-700">
+                              {new Date(c.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{c.content}</p>
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </div>
+
+                {isMember || isOwner ? (
+                  <form onSubmit={handleAddComment}>
+                    <div className="flex items-end gap-2 p-2 rounded-xl border border-white/[0.08] bg-white/[0.03] focus-within:border-sky-500/30 transition-all">
+                      <textarea name="content" required rows={2}
+                        placeholder="Share something with the group..."
+                        className="flex-1 bg-transparent px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none resize-none leading-relaxed" />
+                      <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
+                        type="submit" disabled={addingComment}
+                        className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center flex-shrink-0 shadow-md shadow-sky-500/15 disabled:opacity-40">
+                        {addingComment
+                          ? <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                          : <Send style={{ width: 13, height: 13 }} />
+                        }
+                      </motion.button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] text-center">
+                    <p className="text-gray-600 text-sm">Join this group to participate in the discussion.</p>
+                  </div>
+                )}
+              </GlassCard>
+            </motion.div>
+
           </div>
         </div>
-
-        {(group.tags || []).length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {group.tags.map(t => (
-              <span key={t} className="px-3 py-1 text-xs font-mono rounded-md bg-slate-900 border border-slate-800 text-slate-400">#{t}</span>
-            ))}
-          </div>
-        )}
       </div>
-
-      {/* ── Main ── */}
-      <div className="lg:col-span-2 space-y-8">
-
-        {/* Sessions */}
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2 mb-6">
-            <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2-2v12a2 2 0 002 2z" />
-            </svg>
-            Session Slots
-          </h2>
-
-          {(group.sessions || []).length === 0 ? (
-            <div className="text-center py-10 rounded-xl bg-slate-950/50 border border-slate-800 border-dashed">
-              <p className="text-slate-500 text-sm">No sessions scheduled yet.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {(group.sessions || []).map((s) => {
-                const dateStr = toLocalDateStr(new Date(s.date));
-                const now = new Date();
-                const sessionStart = new Date(`${dateStr}T${s.startTime}:00`);
-                const sessionEnd = new Date(`${dateStr}T${s.endTime}:00`);
-                
-                const isPast = sessionEnd < now;
-                const isInProgress = now >= sessionStart && now <= sessionEnd;
-                const dbStatus = s.status || "scheduled";
-                const isLive = dbStatus === "active" || isInProgress;
-                
-                // Extra robust join check: handle objects, IDs, and nulls
-                const hasJoined = (s.participants || []).some(p => {
-                  const pId = p?._id ? String(p._id) : String(p);
-                  return pId === String(userId);
-                });
-                
-                const acting = slotAction[s._id];
-
-                return (
-                  <div key={s._id} className={`rounded-xl border p-4 flex flex-col sm:flex-row sm:items-center gap-4 transition-all ${
-                    isPast || dbStatus === "completed" ? "border-slate-800 bg-slate-950/30 opacity-50" : 
-                    isLive ? "border-green-500/50 bg-green-500/5 shadow-[0_0_15px_rgba(34,197,94,0.1)] relative overflow-hidden" :
-                    "border-slate-700 bg-slate-950 hover:border-indigo-600/40"
-                  }`}>
-                    {isLive && <div className="absolute top-0 left-0 w-1 h-full bg-green-500 animate-pulse" />}
-                    
-                    {/* Date + time */}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-xs font-bold uppercase tracking-wider ${
-                          isPast || dbStatus === "completed" ? "text-slate-500" : 
-                          isLive ? "text-green-400" :
-                          "text-indigo-400"
-                        }`}>
-                          {new Date(s.date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
-                        </span>
-                        {(isPast || dbStatus === "completed") && <span className="text-[10px] bg-slate-800 text-slate-600 px-2 py-0.5 rounded-full">Completed</span>}
-                        {isLive && (
-                          <span className="flex items-center gap-1 text-[10px] bg-green-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
-                            <span className="w-1.5 h-1.5 bg-white rounded-full" />
-                            LIVE NOW
-                          </span>
-                        )}
-                        {!isPast && !isLive && dbStatus === "scheduled" && (
-                          <span className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-800/40 px-2 py-0.5 rounded-full">Scheduled</span>
-                        )}
-                      </div>
-                      <div className={`text-base font-bold font-mono ${isLive ? "text-green-50" : "text-slate-200"}`}>
-                        {s.startTime} – {s.endTime}
-                      </div>
-                      {s.note && <p className="text-xs text-slate-500 mt-1">{s.note}</p>}
-                    </div>
-
-                    {/* Participant count + actions */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      <span className="text-xs text-slate-500">
-                        <span className="text-slate-300 font-semibold">{s.participants?.length ?? 0}</span> joined
-                      </span>
-
-                      {/* Owner: delete slot */}
-                      {isOwner && !isPast && (
-                        <button
-                          onClick={() => handleDeleteSlot(s._id)}
-                          className="text-xs px-3 py-1.5 rounded-lg bg-red-900/30 text-red-400 border border-red-900/50 hover:bg-red-900/60 transition-colors"
-                        >
-                          Remove
-                        </button>
-                      )}
-
-                      {/* Members: join / leave a slot */}
-                      {isMember && !isOwner && !isPast && (
-                        hasJoined ? (
-                          <button
-                            onClick={() => handleLeaveSlot(s._id)}
-                            disabled={acting === "leaving"}
-                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:border-red-700 hover:text-red-400 transition-colors disabled:opacity-50"
-                          >
-                            {acting === "leaving" ? "..." : "Leave Slot"}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleJoinSlot(s._id)}
-                            disabled={acting === "joining"}
-                            className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-all shadow-sm disabled:opacity-50"
-                          >
-                            {acting === "joining" ? "..." : "Join Slot"}
-                          </button>
-                        )
-                      )}
-
-                      {/* Badge for already joined */}
-                      {hasJoined && !isPast && (
-                        <span className="text-[10px] bg-green-900/30 border border-green-800/40 text-green-400 px-2 py-0.5 rounded-full">You&apos;re in</span>
-                      )}
-
-                      {/* 🚀 Enter Study Room — shown when session is live */}
-                      {isLive && (isMember || isOwner) && (
-                        <button
-                          onClick={() => router.push(`/groups/${groupId}/session/${s._id}`)}
-                          className="text-xs px-4 py-1.5 rounded-lg bg-green-500 text-white font-bold hover:bg-green-400 transition-all shadow-lg shadow-green-500/30 flex items-center gap-1.5"
-                        >
-                          <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
-                          Enter Study Room
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* Discussion */}
-        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
-          <h2 className="text-xl font-bold text-slate-100 mb-6 flex items-center gap-2">
-            <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
-            </svg>
-            Discussion Board
-          </h2>
-
-          <div className="space-y-4 mb-6 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-            {group.comments?.length === 0 ? (
-              <div className="text-center py-8"><p className="text-slate-500 text-sm">Be the first to start the conversation.</p></div>
-            ) : (
-              group.comments.map(c => (
-                <div key={c._id} className="bg-slate-950 rounded-xl p-4 border border-slate-800/50 flex gap-4">
-                  <div className="w-8 h-8 flex-shrink-0 bg-indigo-900/50 border border-indigo-800 text-indigo-300 rounded-full flex items-center justify-center font-bold text-xs">
-                    {c.author?.name?.charAt(0) || "U"}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-semibold text-slate-300">{c.author?.name || "Unknown"}</span>
-                      <span className="text-[10px] text-slate-600">{new Date(c.createdAt).toLocaleDateString()}</span>
-                    </div>
-                    <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{c.content}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {isMember || isOwner ? (
-            <form onSubmit={handleAddComment} className="flex gap-3">
-              <textarea name="content" required rows="1" placeholder="Share something with the group..." className="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none min-h-[48px] transition-all" />
-              <button disabled={addingComment} type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-2 font-medium transition-all disabled:opacity-50 flex-shrink-0">
-                {addingComment ? "..." : "Post"}
-              </button>
-            </form>
-          ) : (
-            <div className="text-center py-4 bg-slate-950 rounded-xl border border-slate-800 text-slate-500 text-sm">
-              Join the group to participate in the discussion.
-            </div>
-          )}
-        </section>
-      </div>
-
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 20px; }
-      `}</style>
     </div>
   );
 }

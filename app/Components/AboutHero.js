@@ -1,170 +1,173 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useEffect } from 'react';
+import { motion, useAnimationFrame, useMotionValue, useSpring } from 'framer-motion';
 
-export default function AboutHero() {
-  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
-  const [isDark, setIsDark] = useState(true);
+const CARDS = [
+  { accent: 'sky',     label: 'Study Circles',   desc: 'Join subject-based groups to learn with peers at your level.' },
+  { accent: 'emerald', label: 'Peer Mentoring',   desc: 'Trade your strengths in one topic for help in another.' },
+  { accent: 'indigo',  label: 'Live Sessions',    desc: 'Host focused sessions with notes, tasks, and follow-ups.' },
+  { accent: 'violet',  label: 'Progress Mesh',    desc: 'See how every session contributes to your long-term goals.' },
+];
 
-  const handleMouseMove = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setCursorPos({ x, y });
+const ACCENT_COLOR = {
+  sky:     'text-sky-400 border-sky-500/20 bg-sky-500/5',
+  emerald: 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5',
+  indigo:  'text-indigo-400 border-indigo-500/20 bg-indigo-500/5',
+  violet:  'text-violet-400 border-violet-500/20 bg-violet-500/5',
+};
+
+const GLOW = {
+  sky:     'rgba(56,189,248,0.07)',
+  emerald: 'rgba(16,185,129,0.07)',
+  indigo:  'rgba(99,102,241,0.07)',
+  violet:  'rgba(139,92,246,0.07)',
+};
+
+/* Card with its own mini cursor glare */
+function Card({ card, index }) {
+  const glareRef = useRef(null);
+
+  const onMouseMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (glareRef.current) {
+      glareRef.current.style.background =
+        `radial-gradient(200px circle at ${e.clientX - r.left}px ${e.clientY - r.top}px, ${GLOW[card.accent]}, transparent 70%)`;
+    }
+  };
+  const onMouseLeave = () => {
+    if (glareRef.current) glareRef.current.style.background = 'none';
   };
 
-  const sectionBg = isDark
-    ? 'bg-gradient-to-b from-slate-950 via-slate-900 to-emerald-950'
-    : 'bg-gradient-to-b from-slate-50 via-white to-sky-50';
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.55, delay: 0.5 + index * 0.09, ease: [0.22, 1, 0.36, 1] }}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      className={`relative rounded-2xl border bg-white/[0.03] p-5 text-left overflow-hidden cursor-default
+        hover:bg-white/[0.055] transition-all duration-300
+        ${ACCENT_COLOR[card.accent].split(' ').filter(c => c.startsWith('border')).join(' ')}`}
+    >
+      <div ref={glareRef} className="absolute inset-0 pointer-events-none transition-all duration-75" />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/[0.07] to-transparent" />
+
+      <p className={`text-[11px] font-bold uppercase tracking-widest mb-2 ${ACCENT_COLOR[card.accent].split(' ')[0]}`}>
+        {card.label}
+      </p>
+      <p className="text-gray-400 text-sm leading-relaxed">{card.desc}</p>
+    </motion.div>
+  );
+}
+
+/* Section-level cursor glare */
+function CursorGlare({ x, y }) {
+  const ref = useRef(null);
+  useAnimationFrame(() => {
+    if (!ref.current) return;
+    ref.current.style.background = [
+      `radial-gradient(160px circle at ${x.get()}px ${y.get()}px, rgba(56,189,248,0.32), transparent 100%)`,
+      `radial-gradient(480px circle at ${x.get()}px ${y.get()}px, rgba(99,102,241,0.14), transparent 70%)`,
+    ].join(', ');
+  });
+  return <div ref={ref} className="absolute inset-0 pointer-events-none z-10" />;
+}
+
+export default function AboutHero() {
+  const sectionRef = useRef(null);
+  const rawX = useMotionValue(-1000);
+  const rawY = useMotionValue(-1000);
+  const cx = useSpring(rawX, { stiffness: 150, damping: 22 });
+  const cy = useSpring(rawY, { stiffness: 150, damping: 22 });
+
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const onMove = (e) => {
+      const r = el.getBoundingClientRect();
+      rawX.set(e.clientX - r.left);
+      rawY.set(e.clientY - r.top);
+    };
+    const onLeave = () => { rawX.set(-1000); rawY.set(-1000); };
+    el.addEventListener('mousemove', onMove);
+    el.addEventListener('mouseleave', onLeave);
+    return () => { el.removeEventListener('mousemove', onMove); el.removeEventListener('mouseleave', onLeave); };
+  }, []);
 
   return (
     <section
-      className={`relative overflow-hidden py-20 px-6 transition-colors ${sectionBg}`}
-      onMouseMove={handleMouseMove}
+      ref={sectionRef}
+      className="relative min-h-[88vh] flex items-center overflow-hidden bg-[#060810] py-32 px-6"
     >
-      {/* Spline animated background (desktop, dark mode). 
-         For best results, replace this URL with your Spline "embed" link
-         from the Share > Embed option, e.g. https://my.spline.design/scene-id/.
-      */}
-      {isDark && (
-        <div className="absolute inset-0 -z-20 hidden md:block">
-          <iframe
-            src="https://app.spline.design/community/file/fba5a24b-a843-461d-b983-e5c140313420"
-            title="MindMesh About background"
-            className="w-full h-full border-0"
-            loading="lazy"
-          />
-        </div>
-      )}
+      <CursorGlare x={cx} y={cy} />
 
-      {/* Gradient overlay to blend Spline with existing dark theme */}
-      {isDark && (
-        <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-slate-950/85 via-slate-950/70 to-emerald-950/90" />
-      )}
-
-      {/* Soft background blobs (respect local light / dark toggle) */}
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <div
-          className={`absolute -top-40 -left-40 h-72 w-72 rounded-full blur-3xl ${
-            isDark ? 'bg-emerald-500/25' : 'bg-sky-400/25'
-          }`}
-        />
-        <div
-          className={`absolute -bottom-40 right-0 h-80 w-80 rounded-full blur-3xl ${
-            isDark ? 'bg-sky-500/25' : 'bg-indigo-400/20'
-          }`}
-        />
+      {/* ambient blobs */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.1)_0%,transparent_70%)]" />
+        <div className="absolute -bottom-32 right-0 w-[500px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.1)_0%,transparent_70%)]" />
       </div>
 
-      {/* Cursor-follow glow similar to Home hero */}
+      {/* dot grid */}
       <div
-        className={`pointer-events-none absolute inset-0 z-0 ${
-          isDark ? 'mix-blend-overlay' : 'mix-blend-screen'
-        }`}
+        className="absolute inset-0 pointer-events-none opacity-[0.18]"
         style={{
-          background: `radial-gradient(420px circle at ${cursorPos.x}px ${cursorPos.y}px, rgba(56,189,248,0.3), transparent 65%)`,
-          transition: 'background-position 0.15s ease-out',
+          backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.28) 1px, transparent 1px)`,
+          backgroundSize: '44px 44px',
+          maskImage: 'radial-gradient(ellipse 80% 75% at 50% 50%, black 30%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 80% 75% at 50% 50%, black 30%, transparent 100%)',
         }}
       />
 
-      <div className="relative z-10 max-w-5xl mx-auto text-center">
-        {/* Local light / dark toggle for About section */}
-        
-        <h1 className="text-4xl md:text-5xl font-bold mb-4">
-          <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500 bg-clip-text text-transparent">
-            About MindMesh
-          </span>
-        </h1>
+      <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-sky-400/40 to-transparent" />
 
-        <p
-          className={`text-lg max-w-3xl mx-auto ${
-            isDark ? 'text-slate-200' : 'text-gray-700'
-          }`}
+      <div className="relative z-20 max-w-5xl mx-auto w-full text-center">
+
+        {/* label */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="inline-flex items-center gap-2 mb-6 px-4 py-1.5 rounded-full border border-sky-500/20 bg-sky-500/5 text-sky-400 text-[11px] font-bold tracking-widest uppercase"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping inline-block" />
+          Our Story
+        </motion.div>
+
+        {/* headline */}
+        <motion.h1
+          initial={{ opacity: 0, y: 28 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+          className="text-[clamp(2.6rem,6.5vw,5rem)] font-black leading-[1.05] tracking-tight mb-6 text-white"
+          style={{ fontFamily: "'Syne', sans-serif" }}
+        >
+          Built by students,{' '}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-blue-400 to-indigo-400">
+            for students
+          </span>
+        </motion.h1>
+
+        {/* sub */}
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="text-gray-400 text-lg max-w-2xl mx-auto leading-relaxed mb-14"
         >
           MindMesh is a collaborative learning platform that connects students
-          who want to study smarter together. Instead of studying alone,
-          students can build strong study networks and stay accountable.
-        </p>
+          who want to study smarter together. Build strong study networks,
+          stay accountable, and grow through peer learning.
+        </motion.p>
 
-        {/* Four cards explaining the platform, light/dark aware */}
-        <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <div
-            className={`rounded-2xl px-4 py-4 text-left shadow-sm border ${
-              isDark
-                ? 'border-slate-700 bg-slate-900/70'
-                : 'border-slate-200 bg-white/80'
-            }`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-500">
-              Study circles
-            </p>
-            <p
-              className={`mt-2 text-sm ${
-                isDark ? 'text-slate-200' : 'text-slate-700'
-              }`}
-            >
-              Join subject-based groups to learn with peers at your level.
-            </p>
-          </div>
-
-          <div
-            className={`rounded-2xl px-4 py-4 text-left shadow-sm border ${
-              isDark
-                ? 'border-slate-700 bg-slate-900/70'
-                : 'border-slate-200 bg-white/80'
-            }`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-500">
-              Peer mentoring
-            </p>
-            <p
-              className={`mt-2 text-sm ${
-                isDark ? 'text-slate-200' : 'text-slate-700'
-              }`}
-            >
-              Trade your strengths in one topic for help in another.
-            </p>
-          </div>
-
-          <div
-            className={`rounded-2xl px-4 py-4 text-left shadow-sm border ${
-              isDark
-                ? 'border-slate-700 bg-slate-900/70'
-                : 'border-slate-200 bg-white/80'
-            }`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">
-              Live sessions
-            </p>
-            <p
-              className={`mt-2 text-sm ${
-                isDark ? 'text-slate-200' : 'text-slate-700'
-              }`}
-            >
-              Host focused sessions with notes, tasks, and follow-ups.
-            </p>
-          </div>
-
-          <div
-            className={`rounded-2xl px-4 py-4 text-left shadow-sm border ${
-              isDark
-                ? 'border-slate-700 bg-slate-900/70'
-                : 'border-slate-200 bg-white/80'
-            }`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-500">
-              Progress mesh
-            </p>
-            <p
-              className={`mt-2 text-sm ${
-                isDark ? 'text-slate-200' : 'text-slate-700'
-              }`}
-            >
-              See how every session contributes to your long-term goals.
-            </p>
-          </div>
+        {/* cards */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {CARDS.map((card, i) => <Card key={i} card={card} index={i} />)}
         </div>
       </div>
+
+      {/* bottom vignette */}
+      <div className="absolute bottom-0 inset-x-0 h-32 bg-gradient-to-t from-[#060810] to-transparent pointer-events-none" />
     </section>
   );
 }

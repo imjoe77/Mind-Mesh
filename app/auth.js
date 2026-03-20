@@ -24,11 +24,14 @@ export const authOptions = {
 
         // One-time: drop stale indexes that no longer match the schema
         if (!authOptions._indexesSynced) {
-          try {
-            await User.collection.dropIndex("usn_1");
-            console.log("Dropped stale usn_1 index");
-          } catch (_) {
-            // Index doesn't exist — that's fine
+          const staleIndexes = ["usn_1", "username_1"];
+          for (const idx of staleIndexes) {
+            try {
+              await User.collection.dropIndex(idx);
+              console.log(`Dropped stale ${idx} index`);
+            } catch (_) {
+              // Index doesn't exist — that's fine
+            }
           }
           authOptions._indexesSynced = true;
         }

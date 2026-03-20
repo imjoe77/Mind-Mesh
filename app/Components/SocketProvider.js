@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import io from "socket.io-client";
+// Removed import io from "socket.io-client" to bypass npm issues
 
 const SocketContext = createContext({ socket: null, connected: false });
 
@@ -18,8 +18,14 @@ export default function SocketProvider({ children }) {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    // Connect to Socket.IO server
-    const socket = io({
+    // Connect to Socket.IO server via global window.io provided by Script tag in layout
+    if (typeof window === "undefined" || !window.io) {
+      console.warn("[SOCKET] window.io not found, retrying...");
+      return;
+    }
+
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+    const socket = window.io(backendUrl, {
       path: "/api/socketio",
       transports: ["websocket", "polling"],
     });

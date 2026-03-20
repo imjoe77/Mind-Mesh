@@ -3,8 +3,41 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "framer-motion";
+import { X, Heart, MessageCircle, Users, Settings, Inbox, Zap } from "lucide-react";
 
-// ─── Chat Panel Component ──────────────────────────────────────────────────
+// ─── Avatar helper ─────────────────────────────────────────────────────────
+function Avatar({ user, className = "", size = 40 }) {
+  const src = user?.profilePicture || user?.image || user?.avatar || user?.photo || null;
+  const initials = (user?.name || "?").charAt(0).toUpperCase();
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={user?.name || ""}
+        width={size}
+        height={size}
+        referrerPolicy="no-referrer"
+        className={`object-cover ${className}`}
+        style={{ width: size, height: size, minWidth: size, minHeight: size }}
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          e.currentTarget.nextSibling?.style && (e.currentTarget.nextSibling.style.display = "flex");
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      className={`flex items-center justify-center text-white font-black ${className}`}
+      style={{ width: size, height: size, minWidth: size, minHeight: size, fontSize: size * 0.38 }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+// ─── Chat Panel ────────────────────────────────────────────────────────────
 function ChatPanel({ connection, myId, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -24,36 +57,21 @@ function ChatPanel({ connection, myId, onClose }) {
 
   useEffect(() => {
     fetchMessages();
-    // Poll every 4 seconds for fallback
     pollRef.current = setInterval(fetchMessages, 4000);
-
-    // Real-time socket listener
-    const handleNewMessage = (e) => {
-      if (e.detail.from === connection._id) {
-        fetchMessages();
-      }
-    };
+    const handleNewMessage = (e) => { if (e.detail.from === connection._id) fetchMessages(); };
     window.addEventListener("new-message", handleNewMessage);
-
-    return () => {
-      clearInterval(pollRef.current);
-      window.removeEventListener("new-message", handleNewMessage);
-    };
+    return () => { clearInterval(pollRef.current); window.removeEventListener("new-message", handleNewMessage); };
   }, [fetchMessages, connection._id]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sending) return;
-    setSending(true);
-    setInput("");
+    setSending(true); setInput("");
     try {
       const res = await fetch(`/api/messages/${connection._id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text }),
       });
       if (res.ok) await fetchMessages();
@@ -61,43 +79,39 @@ function ChatPanel({ connection, myId, onClose }) {
     finally { setSending(false); }
   };
 
-  const formatTime = (ts) => {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="flex flex-col h-[500px] bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-[520px] rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
       {/* Header */}
-      <div className="flex items-center gap-3 p-4 border-b border-slate-800 bg-slate-900">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-sm overflow-hidden flex-shrink-0">
-          {connection.profilePicture
-            ? <img src={connection.profilePicture} alt="" className="w-full h-full object-cover" />
-            : connection.name?.charAt(0)
-          }
+      <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06] bg-white/[0.02]">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 overflow-hidden flex-shrink-0">
+          <Avatar user={connection} size={36} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white truncate">{connection.name}</p>
-          <p className="text-[10px] text-green-400">● Connected</p>
+          <p className="text-[10px] text-emerald-400 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />Connected
+          </p>
         </div>
-        <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors p-1">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/[0.06]">
+          <X style={{ width: 15, height: 15 }} />
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-3xl mb-2">👋</div>
-            <p className="text-slate-400 text-sm">Say hi to {connection.name}!</p>
-            <p className="text-slate-600 text-xs mt-1">Start a conversation or create a study group together.</p>
+          <div className="flex flex-col items-center justify-center h-full text-center gap-2">
+            <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+              <MessageCircle className="text-sky-400" style={{ width: 20, height: 20 }} />
+            </div>
+            <p className="text-gray-400 text-sm font-medium">Say hi to {connection.name}!</p>
+            <p className="text-gray-600 text-xs">Start a conversation or create a study group together.</p>
           </div>
         ) : (
           messages.map((msg) => {
@@ -105,14 +119,10 @@ function ChatPanel({ connection, myId, onClose }) {
             return (
               <div key={msg._id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
-                  isMe
-                    ? "bg-indigo-600 text-white rounded-br-sm"
-                    : "bg-slate-800 text-slate-100 rounded-bl-sm"
+                  isMe ? "bg-sky-600 text-white rounded-br-sm" : "bg-white/[0.07] text-gray-200 rounded-bl-sm"
                 }`}>
                   <p className="leading-relaxed">{msg.content}</p>
-                  <p className={`text-[9px] mt-1 ${isMe ? "text-indigo-200" : "text-slate-500"}`}>
-                    {formatTime(msg.createdAt)}
-                  </p>
+                  <p className={`text-[9px] mt-1 ${isMe ? "text-sky-200" : "text-gray-500"}`}>{formatTime(msg.createdAt)}</p>
                 </div>
               </div>
             );
@@ -122,30 +132,227 @@ function ChatPanel({ connection, myId, onClose }) {
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t border-slate-800 bg-slate-900 flex gap-2">
+      <div className="p-3 border-t border-white/[0.06] bg-white/[0.02] flex gap-2">
         <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+          type="text" value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
           placeholder="Type a message..."
-          className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:ring-1 focus:ring-sky-500 outline-none transition-all"
         />
-        <button
-          onClick={handleSend}
-          disabled={!input.trim() || sending}
-          className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition-colors"
+        <motion.button
+          whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+          onClick={handleSend} disabled={!input.trim() || sending}
+          className="w-9 h-9 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-30 text-white transition-colors flex items-center justify-center flex-shrink-0"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+          <svg className="w-4 h-4 rotate-45" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
           </svg>
-        </button>
+        </motion.button>
       </div>
     </div>
   );
 }
 
-// ─── Main Discover Page ────────────────────────────────────────────────────
+
+// ─── Tinder Swipe Card ─────────────────────────────────────────────────────
+function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
+  const x = useMotionValue(0);
+  const rotate = useTransform(x, [-200, 200], [-14, 14]);
+  const likeOpacity = useTransform(x, [30, 110], [0, 1]);
+  const nopeOpacity = useTransform(x, [-110, -30], [1, 0]);
+  const cardOpacity = useTransform(x, [-300, -150, 0, 150, 300], [0, 1, 1, 1, 0]);
+
+  // ── NEW: swipe animation additions ──
+  const cardScale = useTransform(x, [-200, 0, 200], [0.92, 1, 0.92]);
+
+  const handleDragEnd = (_, info) => {
+    if (info.offset.x > 120) {
+      // Fly off to the right then fire callback
+      animate(x, 700, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onConnect(user._id));
+    } else if (info.offset.x < -120) {
+      // Fly off to the left then fire callback
+      animate(x, -700, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onSkip());
+    }
+  };
+
+  /* unique mesh colours per user based on name char code */
+  const hue = (user.name?.charCodeAt(0) || 200) % 360;
+  const hue2 = (hue + 60) % 360;
+
+  return (
+    <motion.div
+      className="absolute inset-0"
+      style={{
+        x: isTop ? x : 0,
+        rotate: isTop ? rotate : 0,
+        opacity: isTop ? cardOpacity : 1,
+        // NEW: squish scale on drag + background card stacking scale
+        scale: isTop ? cardScale : 1 - index * 0.04,
+        y: isTop ? 0 : index * 10,
+        zIndex: 10 - index,
+        // NEW: subtle blur on background cards for depth
+        filter: isTop ? undefined : `blur(${index * 0.6}px)`,
+      }}
+      drag={isTop ? "x" : false}
+      dragConstraints={{ left: 0, right: 0 }}
+      // NEW: springy elastic feel when dragging and snapping back
+      dragElastic={0.18}
+      dragTransition={{ bounceStiffness: 280, bounceDamping: 22 }}
+      onDragEnd={handleDragEnd}
+      whileDrag={{ cursor: "grabbing" }}
+    >
+      {/* CONNECT / SKIP stamps */}
+      {isTop && (
+        <>
+          <motion.div style={{ opacity: likeOpacity }}
+            className="absolute top-10 left-6 z-20 px-4 py-2 rounded-xl border-2 border-emerald-400 text-emerald-400 font-black text-lg tracking-widest rotate-[-18deg] pointer-events-none backdrop-blur-sm bg-black/20">
+            CONNECT
+          </motion.div>
+          <motion.div style={{ opacity: nopeOpacity }}
+            className="absolute top-10 right-6 z-20 px-4 py-2 rounded-xl border-2 border-rose-400 text-rose-400 font-black text-lg tracking-widest rotate-[18deg] pointer-events-none backdrop-blur-sm bg-black/20">
+            SKIP
+          </motion.div>
+        </>
+      )}
+
+      {/* ── Card shell ── */}
+      <div className="w-full h-full rounded-3xl overflow-hidden border border-white/[0.1] bg-[#0b0f1a] shadow-2xl flex flex-col select-none">
+
+        {/* ── Banner — tall mesh gradient with avatar centred ── */}
+        <div className="relative flex-shrink-0 h-52 flex items-end justify-center pb-0"
+          style={{
+            background: `
+              radial-gradient(ellipse at 20% 40%, hsla(${hue},70%,55%,0.35) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 20%, hsla(${hue2},70%,55%,0.25) 0%, transparent 55%),
+              radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.6) 0%, transparent 60%),
+              linear-gradient(160deg, hsla(${hue},60%,18%,1) 0%, hsla(${hue2},50%,12%,1) 100%)
+            `,
+          }}
+        >
+          {/* dot grid over banner */}
+          <div className="absolute inset-0 opacity-[0.12]"
+            style={{
+              backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)`,
+              backgroundSize: '28px 28px',
+            }}
+          />
+
+          {/* match badge */}
+          {user.matchScore > 0 && (
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur border border-white/10 text-white text-xs font-bold">
+              <Zap style={{ width: 11, height: 11 }} className="text-amber-400" />
+              {Math.min(user.matchScore * 15, 99)}% match
+            </div>
+          )}
+
+          {/* ── Centred avatar ── */}
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-10">
+            <div
+              className="w-24 h-24 rounded-2xl border-4 border-[#0b0f1a] overflow-hidden shadow-2xl flex items-center justify-center text-3xl font-black text-white"
+              style={{ background: `linear-gradient(135deg, hsl(${hue},65%,45%), hsl(${hue2},65%,40%))` }}
+            >
+              <Avatar user={user} size={96} />
+            </div>
+            {/* online dot */}
+            <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-400 border-2 border-[#0b0f1a]" />
+          </div>
+        </div>
+
+        {/* ── Body ── */}
+        <div className="flex-1 pt-6 px-5 pb-4 overflow-y-auto scrollbar-hide flex flex-col gap-3">
+
+          {/* Name + level */}
+          <div className="text-center space-y-1">
+            <h3 className="text-2xl font-black text-white tracking-tight leading-none" style={{ fontFamily: "'Syne', sans-serif" }}>
+              {user.name}
+            </h3>
+            <div className="flex items-center justify-center gap-2">
+              <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                {user.skillLevel || "Student"}
+              </span>
+              {user.subjects?.slice(0, 1).map(subj => (
+                <span key={subj} className="inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-white/[0.04] text-gray-500 border border-white/[0.08]">
+                  {subj}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Bio */}
+          {user.bio && (
+            <p className="text-gray-400 text-xs leading-relaxed text-center line-clamp-2 px-2">{user.bio}</p>
+          )}
+
+          {/* Goal */}
+          {user.goal && (
+            <div className="px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.07] flex gap-2 items-start">
+              <Zap className="text-amber-400 flex-shrink-0 mt-0.5" style={{ width: 12, height: 12 }} />
+              <p className="text-xs text-gray-300 leading-relaxed">{user.goal}</p>
+            </div>
+          )}
+
+          {/* ── Skills & Expertise ── */}
+          <div className="flex flex-col gap-4 mt-auto">
+            {/* TEACHES section */}
+            {user.skillsToTeach?.length > 0 && (
+              <div className="relative overflow-hidden group">
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <div className="w-5 h-5 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                    <Users className="text-emerald-400" style={{ width: 12, height: 12 }} />
+                  </div>
+                  <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-[0.15em]">Teaches</p>
+                  <div className="flex-1 h-[1px] bg-gradient-to-r from-emerald-500/20 to-transparent" />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {user.skillsToTeach.slice(0, 5).map(s => (
+                    <span key={s} className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      mySkills.learn?.includes(s)
+                        ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20"
+                        : "bg-white/[0.04] text-gray-400 border border-white/[0.08] hover:bg-white/[0.08]"
+                    }`}>
+                      {mySkills.learn?.includes(s) && "✓ "}{s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* LEARNING section */}
+            {user.skillsToLearn?.length > 0 && (
+              <div className="relative overflow-hidden group">
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <div className="w-5 h-5 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                    <Zap className="text-sky-400" style={{ width: 12, height: 12 }} />
+                  </div>
+                  <p className="text-[10px] text-sky-400 font-bold uppercase tracking-[0.15em]">Learning</p>
+                  <div className="flex-1 h-[1px] bg-gradient-to-r from-sky-500/20 to-transparent" />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {user.skillsToLearn.slice(0, 5).map(s => (
+                    <span key={s} className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      mySkills.teach?.includes(s)
+                        ? "bg-gradient-to-br from-sky-500 to-sky-600 text-white shadow-lg shadow-sky-500/20"
+                        : "bg-white/[0.04] text-gray-400 border border-white/[0.08] hover:bg-white/[0.08]"
+                    }`}>
+                      {mySkills.teach?.includes(s) && "✓ "}{s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* drag hint */}
+        {isTop && (
+          <p className="text-center text-gray-700 text-[9px] pb-3 tracking-[0.2em] uppercase">drag to swipe</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────
 export default function DiscoverPage() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -169,8 +376,7 @@ export default function DiscoverPage() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [respondingTo, setRespondingTo] = useState(null);
 
-  // Chat state
-  const [openChat, setOpenChat] = useState(null); // connection object
+  const [openChat, setOpenChat] = useState(null);
   const [unreadMap, setUnreadMap] = useState({});
 
   const fetchDiscover = useCallback(async () => {
@@ -181,9 +387,7 @@ export default function DiscoverPage() {
       if (res.ok) {
         setUsers(data.users || []);
         setMySkills(data.mySkills || { teach: [], learn: [] });
-        if (!data.mySkills?.teach?.length && !data.mySkills?.learn?.length) {
-          setShowSetup(true);
-        }
+        if (!data.mySkills?.teach?.length && !data.mySkills?.learn?.length) setShowSetup(true);
         setCurrentIndex(0);
       }
     } catch (err) { console.error(err); }
@@ -194,10 +398,7 @@ export default function DiscoverPage() {
     try {
       const res = await fetch("/api/users/connections");
       const data = await res.json();
-      if (res.ok) {
-        setConnections(data.connections || []);
-        setPendingRequests(data.pendingRequests || []);
-      }
+      if (res.ok) { setConnections(data.connections || []); setPendingRequests(data.pendingRequests || []); }
     } catch (err) { console.error(err); }
   }, []);
 
@@ -211,10 +412,7 @@ export default function DiscoverPage() {
 
   useEffect(() => {
     if (session) {
-      fetchDiscover();
-      fetchConnections();
-      fetchUnread();
-      // Poll unread counts every 8 seconds
+      fetchDiscover(); fetchConnections(); fetchUnread();
       const t = setInterval(fetchUnread, 8000);
       return () => clearInterval(t);
     }
@@ -223,10 +421,7 @@ export default function DiscoverPage() {
   useEffect(() => {
     if (session && showSetup) {
       fetch("/api/users/profile").then(r => r.json()).then(data => {
-        if (data.user) {
-          setTeachSkills(data.user.skillsToTeach || []);
-          setLearnSkills(data.user.skillsToLearn || []);
-        }
+        if (data.user) { setTeachSkills(data.user.skillsToTeach || []); setLearnSkills(data.user.skillsToLearn || []); }
       });
     }
   }, [session, showSetup]);
@@ -240,8 +435,7 @@ export default function DiscoverPage() {
     setSwipeDir("right");
     try {
       const res = await fetch("/api/users/follow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetUserId: userId, message: "Let's study together!" }),
       });
       const data = await res.json();
@@ -255,8 +449,7 @@ export default function DiscoverPage() {
     setRespondingTo(requesterId);
     try {
       const res = await fetch("/api/users/follow/respond", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requesterId, action }),
       });
       if (res.ok) { await fetchConnections(); await fetchDiscover(); }
@@ -279,8 +472,7 @@ export default function DiscoverPage() {
     setSavingProfile(true);
     try {
       await fetch("/api/users/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skillsToTeach: teachSkills, skillsToLearn: learnSkills }),
       });
       setShowSetup(false);
@@ -291,331 +483,429 @@ export default function DiscoverPage() {
 
   if (!session) {
     return (
-      <div className="max-w-md mx-auto mt-20 p-6 bg-slate-900 border border-slate-800 rounded-xl text-center">
-        <h2 className="text-xl font-semibold mb-4 text-slate-100">Sign in to Discover</h2>
-        <p className="text-slate-400 mb-6">Connect with students who match your learning goals.</p>
-        <button onClick={() => router.push("/Login")} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg font-medium transition-colors">Sign In</button>
+      <div className="min-h-screen bg-[#060810] flex items-center justify-center px-4">
+        <div className="text-center max-w-sm">
+          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20">
+            <Users className="text-white" style={{ width: 28, height: 28 }} />
+          </div>
+          <h2 className="text-2xl font-black text-white mb-2" style={{ fontFamily: "'Syne', sans-serif" }}>Sign in to Discover</h2>
+          <p className="text-gray-500 mb-8 text-sm">Connect with students who match your learning goals.</p>
+          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+            onClick={() => router.push("/Login")}
+            className="px-8 py-3 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-sky-500/20">
+            Sign In
+          </motion.button>
+        </div>
       </div>
     );
   }
 
-  // ─── Skills Setup ──────────────────────────────────────────────────────────
+  // ── Skills Setup ─────────────────────────────────────────────────────────
   if (showSetup) {
     return (
-      <div className="max-w-lg mx-auto mt-12 px-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+      <div className="min-h-screen bg-[#060810] flex items-center justify-center px-4 py-12">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-lg rounded-3xl border border-white/[0.08] bg-[#0d1117] p-8 shadow-2xl"
+        >
           <div className="text-center mb-8">
-            <div className="w-16 h-16 mx-auto bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg">
-              <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center mb-4 shadow-lg shadow-sky-500/20">
+              <Zap className="text-white" style={{ width: 24, height: 24 }} />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">Set Up Your Skills</h1>
-            <p className="text-slate-400 text-sm">Tell us what you can teach and what you want to learn.</p>
+            <h1 className="text-2xl font-black text-white mb-1" style={{ fontFamily: "'Syne', sans-serif" }}>Set Up Your Skills</h1>
+            <p className="text-gray-500 text-sm">Tell us what you can teach and what you want to learn.</p>
           </div>
 
+          {/* Teach */}
           <div className="mb-6">
-            <label className="block text-sm font-semibold text-green-400 mb-2">🎓 Skills I Can Teach</label>
+            <label className="block text-xs font-bold text-emerald-400 uppercase tracking-widest mb-2">Skills I Can Teach</label>
             <div className="flex gap-2 mb-2">
               <input type="text" value={teachInput} onChange={e => setTeachInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addTeachSkill())}
-                placeholder="e.g. React, Python, DSA..." className="flex-1 bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500 outline-none" />
-              <button onClick={addTeachSkill} className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg">+</button>
+                placeholder="e.g. React, Python, DSA..."
+                className="flex-1 bg-white/[0.04] border border-white/[0.08] text-gray-200 text-sm rounded-xl px-4 py-2.5 focus:ring-1 focus:ring-emerald-500 outline-none placeholder-gray-600" />
+              <button onClick={addTeachSkill} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-colors">+</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {teachSkills.map(s => (
-                <span key={s} className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400">
-                  {s}<button onClick={() => setTeachSkills(teachSkills.filter(x => x !== s))} className="hover:text-white ml-0.5">✕</button>
+                <span key={s} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
+                  {s}<button onClick={() => setTeachSkills(teachSkills.filter(x => x !== s))} className="hover:text-white opacity-60 hover:opacity-100"><X style={{ width: 10, height: 10 }} /></button>
                 </span>
               ))}
             </div>
           </div>
 
+          {/* Learn */}
           <div className="mb-8">
-            <label className="block text-sm font-semibold text-blue-400 mb-2">📚 Skills I Want to Learn</label>
+            <label className="block text-xs font-bold text-sky-400 uppercase tracking-widest mb-2">Skills I Want to Learn</label>
             <div className="flex gap-2 mb-2">
               <input type="text" value={learnInput} onChange={e => setLearnInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addLearnSkill())}
-                placeholder="e.g. Machine Learning, AWS..." className="flex-1 bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none" />
-              <button onClick={addLearnSkill} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg">+</button>
+                placeholder="e.g. Machine Learning, AWS..."
+                className="flex-1 bg-white/[0.04] border border-white/[0.08] text-gray-200 text-sm rounded-xl px-4 py-2.5 focus:ring-1 focus:ring-sky-500 outline-none placeholder-gray-600" />
+              <button onClick={addLearnSkill} className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold rounded-xl transition-colors">+</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {learnSkills.map(s => (
-                <span key={s} className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400">
-                  {s}<button onClick={() => setLearnSkills(learnSkills.filter(x => x !== s))} className="hover:text-white ml-0.5">✕</button>
+                <span key={s} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-500/25 text-sky-400">
+                  {s}<button onClick={() => setLearnSkills(learnSkills.filter(x => x !== s))} className="hover:text-white opacity-60 hover:opacity-100"><X style={{ width: 10, height: 10 }} /></button>
                 </span>
               ))}
             </div>
           </div>
 
-          <button onClick={saveProfile} disabled={savingProfile || (!teachSkills.length && !learnSkills.length)}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            {savingProfile ? "Saving..." : "Start Discovering 🚀"}
-          </button>
-          <button onClick={() => setShowSetup(false)} className="w-full mt-3 py-2 text-slate-500 text-sm hover:text-slate-300 transition-colors">Skip for now</button>
-        </div>
+          <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            onClick={saveProfile} disabled={savingProfile || (!teachSkills.length && !learnSkills.length)}
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-sm shadow-lg shadow-sky-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+            {savingProfile ? "Saving..." : "Start Discovering →"}
+          </motion.button>
+          <button onClick={() => setShowSetup(false)} className="w-full mt-3 py-2 text-gray-600 text-xs hover:text-gray-400 transition-colors">Skip for now</button>
+        </motion.div>
       </div>
     );
   }
 
   const currentUser = users[currentIndex];
   const totalUnread = Object.values(unreadMap).reduce((s, c) => s + c, 0);
+  const visibleStack = users.slice(currentIndex, currentIndex + 3);
+
+  const TABS = [
+    { id: "discover",     label: "Discover",     icon: Zap },
+    { id: "requests",     label: "Requests",     icon: Inbox,   badge: pendingRequests.length },
+    { id: "connections",  label: "Connections",  icon: Users,   badge: connections.length },
+  ];
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4">
+    <div className="min-h-screen bg-[#060810]">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400 bg-clip-text text-transparent">Discover</h1>
-          <p className="text-slate-400 text-sm mt-1">Find your perfect study partner</p>
-        </div>
-        <button onClick={() => setShowSetup(true)} className="text-xs px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors">
-          ⚙ Edit Skills
-        </button>
+      {/* ambient bg */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.05)_0%,transparent_70%)]" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.05)_0%,transparent_70%)]" />
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 mb-8 max-w-lg">
-        {[
-          { id: "discover", label: "Discover", icon: "🔍" },
-          { id: "requests", label: `Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ""}`, icon: "📩" },
-          { id: "connections", label: `Connections${connections.length > 0 ? ` (${connections.length})` : ""}`, icon: "🤝" },
-        ].map(t => (
-          <button key={t.id}
-            onClick={() => { setTab(t.id); if (t.id !== "discover") fetchConnections(); if (t.id === "connections") fetchUnread(); }}
-            className={`flex-1 text-sm py-2.5 rounded-lg font-medium transition-all ${tab === t.id ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-slate-400 hover:text-white"}`}>
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
+      <div className="relative z-10 max-w-5xl mx-auto px-4 py-8">
 
-      {/* Toast */}
-      {actionMsg && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl bg-green-500 text-white font-semibold shadow-xl text-sm animate-bounce">
-          {actionMsg}
+        {/* ── Page header ── */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-black text-white tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>
+              Discover
+            </h1>
+            <p className="text-gray-500 text-sm mt-0.5">Find your perfect study partner</p>
+          </div>
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
+            onClick={() => setShowSetup(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 hover:text-white text-xs font-semibold transition-all hover:bg-white/[0.06]"
+          >
+            <Settings style={{ width: 13, height: 13 }} />
+            Edit Skills
+          </motion.button>
         </div>
-      )}
 
-      {/* ─── DISCOVER TAB ─────────────────────────────────────────────────── */}
-      {tab === "discover" && (
-        <div className="flex justify-center">
-          {loading ? (
-            <div className="w-full max-w-sm h-[500px] bg-slate-800/50 rounded-2xl animate-pulse" />
-          ) : !currentUser ? (
-            <div className="text-center py-20 max-w-sm">
-              <div className="text-6xl mb-4">🎉</div>
-              <h3 className="text-xl font-bold text-white mb-2">You&apos;ve seen everyone!</h3>
-              <p className="text-slate-400 text-sm mb-6">Check back later or edit your skills to expand matches.</p>
-              <button onClick={() => { setCurrentIndex(0); fetchDiscover(); }} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-500 text-sm">Refresh</button>
-            </div>
-          ) : (
-            <div className="relative w-full max-w-sm">
-              {users[currentIndex + 1] && (
-                <div className="absolute top-3 left-3 right-3 h-[480px] bg-slate-800/40 rounded-2xl border border-slate-700/50 -z-10" />
+        {/* ── Tabs ── */}
+        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.07] rounded-2xl p-1.5 mb-8 max-w-md">
+          {TABS.map(({ id, label, icon: Icon, badge }) => (
+            <button key={id}
+              onClick={() => { setTab(id); if (id !== "discover") fetchConnections(); if (id === "connections") fetchUnread(); }}
+              className={`relative flex-1 flex items-center justify-center gap-1.5 text-xs py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+                tab === id
+                  ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              <Icon style={{ width: 13, height: 13 }} />
+              {label}
+              {badge > 0 && (
+                <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-black flex items-center justify-center ${tab === id ? "bg-white text-sky-600" : "bg-sky-500 text-white"}`}>
+                  {badge}
+                </span>
               )}
-              <div className={`bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden transition-all duration-300 ${
-                swipeDir === "left" ? "-translate-x-[120%] rotate-[-15deg] opacity-0" :
-                swipeDir === "right" ? "translate-x-[120%] rotate-[15deg] opacity-0" : "translate-x-0 rotate-0 opacity-100"
-              }`}>
-                <div className="h-28 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 relative">
-                  <div className="absolute -bottom-10 left-6">
-                    <div className="w-20 h-20 rounded-2xl bg-slate-900 border-4 border-slate-900 shadow-xl overflow-hidden flex items-center justify-center text-2xl font-bold text-white">
-                      {currentUser.profilePicture
-                        ? <img src={currentUser.profilePicture} alt="" className="w-full h-full object-cover" />
-                        : <span className="bg-gradient-to-br from-indigo-500 to-purple-600 w-full h-full flex items-center justify-center">{currentUser.name?.charAt(0)}</span>
-                      }
-                    </div>
-                  </div>
-                  {currentUser.matchScore > 0 && (
-                    <div className="absolute top-4 right-4 px-3 py-1 rounded-full bg-white/20 backdrop-blur text-white text-xs font-bold">
-                      {currentUser.matchScore >= 6 ? "🔥" : "⭐"} {Math.min(currentUser.matchScore * 15, 99)}% match
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-14 px-6 pb-4">
-                  <h3 className="text-xl font-bold text-white mb-0.5">{currentUser.name}</h3>
-                  <p className="text-sm text-slate-400 mb-2">{currentUser.skillLevel || "Student"}</p>
-                  {currentUser.bio && <p className="text-sm text-slate-300 mb-3 leading-relaxed">{currentUser.bio}</p>}
-                  {currentUser.goal && (
-                    <div className="mb-3 px-3 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
-                      <p className="text-[10px] text-indigo-400 font-bold uppercase mb-0.5">Goal</p>
-                      <p className="text-xs text-indigo-200">{currentUser.goal}</p>
-                    </div>
-                  )}
-                  {currentUser.skillsToTeach?.length > 0 && (
-                    <div className="mb-3">
-                      <p className="text-[10px] text-green-400 font-bold uppercase tracking-wider mb-1.5">Can Teach</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {currentUser.skillsToTeach.map(s => (
-                          <span key={s} className={`text-xs px-2.5 py-1 rounded-full font-medium ${mySkills.learn?.includes(s) ? "bg-green-500 text-white" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
-                            {mySkills.learn?.includes(s) && "✓ "}{s}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {currentUser.skillsToLearn?.length > 0 && (
-                    <div className="mb-2">
-                      <p className="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1.5">Wants to Learn</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {currentUser.skillsToLearn.map(s => (
-                          <span key={s} className={`text-xs px-2.5 py-1 rounded-full font-medium ${mySkills.teach?.includes(s) ? "bg-blue-500 text-white" : "bg-blue-500/10 border border-blue-500/30 text-blue-400"}`}>
-                            {mySkills.teach?.includes(s) && "✓ "}{s}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="px-6 pb-6 flex gap-3">
-                  <button onClick={handleSkip} className="flex-1 py-3.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 font-medium hover:bg-slate-700 hover:text-white transition-all flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    Skip
-                  </button>
-                  <button onClick={() => handleConnect(currentUser._id)} className="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-semibold transition-all shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-                    Connect
-                  </button>
-                </div>
-              </div>
-              <p className="text-center text-xs text-slate-600 mt-4">{currentIndex + 1} of {users.length} matches</p>
-            </div>
-          )}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* ─── REQUESTS TAB ─────────────────────────────────────────────────── */}
-      {tab === "requests" && (
-        <div className="max-w-lg mx-auto space-y-4">
-          {pendingRequests.length === 0 ? (
-            <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-              <div className="text-4xl mb-3">📭</div>
-              <p className="text-slate-400 text-sm">No pending requests right now.</p>
-            </div>
-          ) : (
-            pendingRequests.map(req => (
-              <div key={req.from._id || req.from} className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
-                  {req.from.profilePicture ? <img src={req.from.profilePicture} alt="" className="w-full h-full object-cover" /> : req.from.name?.charAt(0) || "?"}
+        {/* ── Toast ── */}
+        <AnimatePresence>
+          {actionMsg && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.95 }}
+              className="fixed top-24 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-2xl bg-emerald-500/90 backdrop-blur text-white font-semibold shadow-xl text-sm border border-emerald-400/30"
+            >
+              {actionMsg}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ════════════════════════════════════════
+            DISCOVER TAB — tinder card stack
+        ════════════════════════════════════════ */}
+        {tab === "discover" && (
+          <div className="flex flex-col lg:flex-row gap-8 items-start justify-center">
+
+            {/* Card Stack */}
+            <div className="flex flex-col items-center gap-6 w-full lg:w-auto">
+              {loading ? (
+                <div className="w-[340px] h-[560px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+              ) : !currentUser ? (
+                <div className="w-[340px] h-[560px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+                    <Zap className="text-gray-600" style={{ width: 28, height: 28 }} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white mb-1" style={{ fontFamily: "'Syne', sans-serif" }}>You&apos;ve seen everyone!</h3>
+                    <p className="text-gray-500 text-sm">Check back later or edit your skills to expand matches.</p>
+                  </div>
+                  <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                    onClick={() => { setCurrentIndex(0); fetchDiscover(); }}
+                    className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-sm font-bold rounded-xl">
+                    Refresh
+                  </motion.button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-white text-sm">{req.from.name}</p>
-                  <p className="text-xs text-slate-400 truncate">{req.from.bio || "Wants to connect"}</p>
-                  {req.from.skillsToTeach?.length > 0 && (
-                    <div className="flex gap-1 mt-1.5 flex-wrap">
-                      {req.from.skillsToTeach.slice(0, 3).map(s => (
-                        <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/30">{s}</span>
+              ) : (
+                <>
+                  {/* card stack */}
+                  <div className="relative w-[340px] h-[560px]">
+                    {[...visibleStack].reverse().map((user, revIdx) => {
+                      const idx = visibleStack.length - 1 - revIdx;
+                      return (
+                        <SwipeCard
+                          key={user._id}
+                          user={user}
+                          mySkills={mySkills}
+                          onConnect={handleConnect}
+                          onSkip={handleSkip}
+                          isTop={idx === 0}
+                          index={idx}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-4">
+                    <motion.button
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                      onClick={handleSkip}
+                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/25 transition-all shadow-lg"
+                    >
+                      <X style={{ width: 22, height: 22 }} />
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                      onClick={() => handleConnect(currentUser._id)}
+                      className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/30"
+                    >
+                      <Heart style={{ width: 24, height: 24 }} />
+                    </motion.button>
+
+                    <motion.button
+                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                      onClick={() => handleSkip()}
+                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/[0.08] transition-all shadow-lg"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                      </svg>
+                    </motion.button>
+                  </div>
+
+                  <p className="text-gray-700 text-xs tracking-widest uppercase">{currentIndex + 1} of {users.length} matches</p>
+                </>
+              )}
+            </div>
+
+            {/* Sidebar tip card */}
+            {currentUser && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+                className="hidden lg:block w-72 space-y-4"
+              >
+                <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-6 shadow-xl relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 blur-2xl rounded-full" />
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] mb-4">HOW IT WORKS</p>
+                  <div className="space-y-4">
+                    {[
+                      { icon: <motion.span animate={{ x: [-2, 2, -2] }} transition={{ repeat: Infinity, duration: 2 }}>←</motion.span>, label: "Swipe left to skip", color: "text-rose-400" },
+                      { icon: <motion.span animate={{ x: [2, -2, 2] }} transition={{ repeat: Infinity, duration: 2 }}>→</motion.span>, label: "Swipe right to connect", color: "text-emerald-400" },
+                      { icon: "✓", label: "Highlighted skills = match", color: "text-sky-400" },
+                    ].map(({ icon, label, color }) => (
+                      <div key={label} className="flex items-center gap-4 text-xs">
+                        <span className={`w-8 h-8 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center font-black ${color} flex-shrink-0 shadow-inner`}>
+                          {icon}
+                        </span>
+                        <span className="text-gray-400 font-medium">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {mySkills.teach?.length > 0 && (
+                  <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-6 shadow-xl">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-6 h-6 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                        <Zap className="text-sky-400" style={{ width: 14, height: 14 }} />
+                      </div>
+                      <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">YOUR SKILLS</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {mySkills.teach.map(s => (
+                        <span key={s} className="text-[11px] px-3 py-1.5 rounded-xl bg-sky-500/5 border border-sky-500/10 text-sky-400 hover:bg-sky-500/10 transition-colors font-bold cursor-default">{s}</span>
                       ))}
                     </div>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={() => handleRespond(req.from._id, "reject")} disabled={respondingTo === req.from._id}
-                    className="px-3 py-2 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:border-red-700 hover:text-red-400 transition-colors text-xs font-medium disabled:opacity-50">✕</button>
-                  <button onClick={() => handleRespond(req.from._id, "accept")} disabled={respondingTo === req.from._id}
-                    className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50">
-                    {respondingTo === req.from._id ? "..." : "Accept"}
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* ─── CONNECTIONS TAB ─────────────────────────────────────────────── */}
-      {tab === "connections" && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 items-start">
-          {/* Connection Cards */}
-          <div className="space-y-4">
-            {connections.length === 0 ? (
-              <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-                <div className="text-4xl mb-3">🌐</div>
-                <h3 className="text-lg font-semibold text-white mb-2">No connections yet</h3>
-                <p className="text-slate-400 text-sm mb-4">Start swiping to find your study partners!</p>
-                <button onClick={() => setTab("discover")} className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 transition-colors">Go to Discover</button>
-              </div>
-            ) : (
-              connections.map(conn => {
-                const unreadCount = unreadMap[conn._id?.toString()] || 0;
-                const isActive = openChat?._id === conn._id;
-                return (
-                  <div key={conn._id}
-                    className={`bg-slate-900 border rounded-xl p-5 transition-all ${isActive ? "border-indigo-500/50 shadow-lg shadow-indigo-500/10" : "border-slate-800 hover:border-slate-700"}`}>
-                    <div className="flex items-center gap-4">
-                      <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
-                        {conn.profilePicture ? <img src={conn.profilePicture} alt="" className="w-full h-full object-cover" /> : conn.name?.charAt(0)}
-                        {unreadCount > 0 && (
-                          <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center">
-                            {unreadCount}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-white text-sm">{conn.name}</p>
-                        <p className="text-xs text-slate-400 truncate">{conn.skillLevel || "Student"}</p>
-                        <div className="flex gap-1 mt-1.5 flex-wrap">
-                          {(conn.skillsToTeach || []).slice(0, 2).map(s => (
-                            <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/30">Teaches {s}</span>
-                          ))}
-                        </div>
-                      </div>
-                      {/* Action buttons */}
-                      <div className="flex flex-col gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => setOpenChat(isActive ? null : conn)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                            isActive
-                              ? "bg-indigo-600 text-white"
-                              : "bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white border border-slate-700"
-                          }`}
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                          </svg>
-                          {isActive ? "Close Chat" : "Message"}
-                        </button>
-                        <button
-                          onClick={() => router.push(`/groups/create?inviteId=${conn._id}&inviteName=${encodeURIComponent(conn.name)}`)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-purple-600 hover:text-white border border-slate-700 transition-all"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          Study Group
-                        </button>
-                      </div>
-                    </div>
                   </div>
-                );
-              })
+                )}
+              </motion.div>
             )}
           </div>
+        )}
 
-          {/* Chat Panel — slides in on the right */}
-          {openChat && (
-            <div className="sticky top-24">
-              <ChatPanel
-                connection={openChat}
-                myId={session?.user?.id}
-                onClose={() => setOpenChat(null)}
-              />
-              <div className="mt-3 p-3 bg-purple-950/40 border border-purple-800/30 rounded-xl text-center">
-                <p className="text-xs text-purple-300 mb-2">Want to study together?</p>
-                <button
-                  onClick={() => router.push(`/groups/create?inviteId=${openChat._id}&inviteName=${encodeURIComponent(openChat.name)}`)}
-                  className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-purple-500/20"
-                >
-                  🚀 Create Study Group with {openChat.name}
-                </button>
+        {/* ════════════════════════════════════════
+            REQUESTS TAB
+        ════════════════════════════════════════ */}
+        {tab === "requests" && (
+          <div className="max-w-lg mx-auto space-y-3">
+            {pendingRequests.length === 0 ? (
+              <div className="text-center py-20 rounded-3xl border border-white/[0.07] bg-white/[0.02]">
+                <Inbox className="mx-auto text-gray-700 mb-3" style={{ width: 36, height: 36 }} />
+                <p className="text-gray-500 text-sm">No pending requests right now.</p>
               </div>
+            ) : (
+              pendingRequests.map(req => (
+                <motion.div
+                  key={req.from._id || req.from}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5 flex items-center gap-4"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 overflow-hidden flex-shrink-0">
+                    <Avatar user={req.from} size={48} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-white text-sm">{req.from.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{req.from.bio || "Wants to connect"}</p>
+                    {req.from.skillsToTeach?.length > 0 && (
+                      <div className="flex gap-1 mt-1.5 flex-wrap">
+                        {req.from.skillsToTeach.slice(0, 3).map(s => (
+                          <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">{s}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button onClick={() => handleRespond(req.from._id, "reject")} disabled={respondingTo === req.from._id}
+                      className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] text-gray-500 hover:text-rose-400 hover:border-rose-500/25 transition-all disabled:opacity-40 flex items-center justify-center">
+                      <X style={{ width: 14, height: 14 }} />
+                    </button>
+                    <button onClick={() => handleRespond(req.from._id, "accept")} disabled={respondingTo === req.from._id}
+                      className="px-4 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors disabled:opacity-40">
+                      {respondingTo === req.from._id ? "..." : "Accept"}
+                    </button>
+                  </div>
+                </motion.div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* ════════════════════════════════════════
+            CONNECTIONS TAB
+        ════════════════════════════════════════ */}
+        {tab === "connections" && (
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 items-start">
+            <div className="space-y-3">
+              {connections.length === 0 ? (
+                <div className="text-center py-20 rounded-3xl border border-white/[0.07] bg-white/[0.02]">
+                  <Users className="mx-auto text-gray-700 mb-3" style={{ width: 36, height: 36 }} />
+                  <h3 className="text-base font-black text-white mb-1" style={{ fontFamily: "'Syne', sans-serif" }}>No connections yet</h3>
+                  <p className="text-gray-500 text-sm mb-6">Start swiping to find your study partners!</p>
+                  <button onClick={() => setTab("discover")} className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white rounded-xl text-sm font-bold">Go to Discover</button>
+                </div>
+              ) : (
+                connections.map(conn => {
+                  const unreadCount = unreadMap[conn._id?.toString()] || 0;
+                  const isActive = openChat?._id === conn._id;
+                  return (
+                    <motion.div key={conn._id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`rounded-2xl border p-5 transition-all duration-200 ${
+                        isActive ? "border-sky-500/30 bg-sky-500/[0.04]" : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
+                          {conn.profilePicture ? <img src={conn.profilePicture} alt="" className="w-full h-full object-cover" /> : conn.name?.charAt(0)}
+                          {unreadCount > 0 && (
+                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-[9px] font-black flex items-center justify-center">{unreadCount}</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-white text-sm">{conn.name}</p>
+                          <p className="text-xs text-gray-500">{conn.skillLevel || "Student"}</p>
+                          <div className="flex gap-1 mt-1.5 flex-wrap">
+                            {(conn.skillsToTeach || []).slice(0, 2).map(s => (
+                              <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">Teaches {s}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 flex-shrink-0">
+                          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                            onClick={() => setOpenChat(isActive ? null : conn)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                              isActive
+                                ? "bg-sky-600 text-white"
+                                : "bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-sky-600 hover:border-sky-600"
+                            }`}
+                          >
+                            <MessageCircle style={{ width: 12, height: 12 }} />
+                            {isActive ? "Close" : "Message"}
+                          </motion.button>
+                          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                            onClick={() => router.push(`/groups/create?inviteId=${conn._id}&inviteName=${encodeURIComponent(conn.name)}`)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-600 transition-all"
+                          >
+                            <Users style={{ width: 12, height: 12 }} />
+                            Study Group
+                          </motion.button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Chat panel */}
+            {openChat && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                className="sticky top-24 space-y-3"
+              >
+                <ChatPanel connection={openChat} myId={session?.user?.id} onClose={() => setOpenChat(null)} />
+                <div className="p-4 rounded-2xl border border-white/[0.07] bg-indigo-500/[0.04] text-center">
+                  <p className="text-xs text-gray-500 mb-3">Want to study together?</p>
+                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                    onClick={() => router.push(`/groups/create?inviteId=${openChat._id}&inviteName=${encodeURIComponent(openChat.name)}`)}
+                    className="w-full py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-sky-500/15">
+                    Create Study Group with {openChat.name} →
+                  </motion.button>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }

@@ -8,6 +8,11 @@ const UserSchema = new Schema(
         name: { type: String, default: "" },
         profilePicture: { type: String, default: "" },
         bio: { type: String, maxlength: 250, default: "" },
+        branch: { type: String, default: "" },
+        semester: { type: String, default: "" },
+        year: { type: String, default: "" },
+        rollNumber: { type: String, default: "" },
+        institution: { type: String, default: "" },
         
         // --- LEARNING FIELDS ---
         domains: {

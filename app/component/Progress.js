@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react"
 import StatTile from "./StatTile"
 import SubjectBar from "./SubjectBar"
@@ -59,34 +61,42 @@ export default function ProgressCard() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Overview */}
-      <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-sm font-bold text-zinc-900">Academic Overview</h3>
-          <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-bold uppercase tracking-widest">
+    <div className="space-y-5">
+      {/* Overview Card */}
+      <div className="bg-white border border-zinc-200/80 rounded-2xl p-6 lg:p-7 hover:shadow-lg hover:shadow-zinc-900/[0.03] transition-all duration-500 group relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50/30 rounded-full blur-3xl -mr-16 -mt-16" />
+        
+        <div className="flex justify-between items-center mb-5 relative">
+          <div>
+            <h3 className="text-[15px] font-bold text-zinc-800 tracking-tight">Academic Intelligence</h3>
+            <p className="text-[11px] text-zinc-400 font-medium uppercase tracking-wide mt-0.5">Real-time Performance Metrics</p>
+          </div>
+          <span className="text-[11px] text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full font-semibold tracking-wide border border-indigo-100/80">
             {data.semester}
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <StatTile value={data.attendance} label="Attendance" sub="Analyzed" />
-          <StatTile value={String(data.assignments)} label="Assignments" sub="Completed" />
-          <StatTile value={data.gpa} label="GPA / SGPA" sub={metrics ? "AI Evaluated" : "Out of 4.0"} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 relative">
+          <StatTile value={data.attendance} label="Attendance" sub="Biometric Verified" />
+          <StatTile value={String(data.assignments)} label="Tasks Done" sub="This Semester" />
+          <StatTile value={data.gpa} label="Cumulative GPA" sub={metrics ? "AI Evaluated" : "Standard Scale"} />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 text-zinc-800">
         {/* Subject progress */}
-        <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-zinc-900">Subject Performance</h3>
-            <span className="text-[10px] bg-slate-100 text-slate-500 font-bold uppercase px-2 py-0.5 rounded-full tracking-wider">
-              {metrics ? "VERIFIED" : "MOCK DATA"}
-            </span>
+        <div className="bg-white border border-zinc-200/80 rounded-2xl p-6 hover:shadow-lg hover:shadow-zinc-900/[0.03] transition-all duration-500">
+          <div className="flex justify-between items-center mb-5">
+            <h3 className="text-[14px] font-bold text-zinc-800 tracking-tight">Subject Mastery</h3>
+            <div className="flex items-center gap-2">
+               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+               <span className="text-[11px] text-zinc-400 font-medium uppercase tracking-wide">
+                 {metrics ? "Live Data" : "Preview Mode"}
+               </span>
+            </div>
           </div>
 
-          <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+          <div className="max-h-[320px] overflow-y-auto pr-4 custom-scrollbar space-y-1">
             {data.subjects.map((s, i) => (
               <SubjectBar key={i} {...s} />
             ))}
@@ -94,17 +104,38 @@ export default function ProgressCard() {
         </div>
 
         {/* Upcoming */}
-        <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
-          <h3 className="text-sm font-bold text-zinc-900 mb-4">Upcoming deadlines</h3>
-          {data.upcoming.map((u, i) => <UpcomingRow key={i} {...u} />)}
-          <p className="text-xs text-zinc-300 mt-4 text-center">All times in IST</p>
+        <div className="bg-white border border-zinc-200/80 rounded-2xl p-6 hover:shadow-lg hover:shadow-zinc-900/[0.03] transition-all duration-500">
+          <div className="flex items-center gap-2.5 mb-5">
+             <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center text-rose-500">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+             </div>
+             <h3 className="text-[14px] font-bold text-zinc-800 tracking-tight">Critical Deadlines</h3>
+          </div>
+          
+          <div className="space-y-0">
+            {data.upcoming.map((u, i) => <UpcomingRow key={i} {...u} />)}
+          </div>
+          
+          <div className="mt-5 pt-3 border-t border-zinc-100 flex justify-between items-center">
+             <p className="text-[11px] font-medium text-zinc-300 uppercase tracking-wide">Times in IST</p>
+             <button className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 uppercase tracking-wide">View Calendar →</button>
+          </div>
         </div>
       </div>
 
       {/* Recent activity */}
-      <div className="bg-white border border-zinc-100 rounded-xl p-6 hover:shadow-lg transition">
-        <h3 className="text-sm font-bold text-zinc-900 mb-2">Recent activity</h3>
-        {data.activity.map((a, i) => <ActivityRow key={i} {...a} />)}
+      <div className="bg-white border border-zinc-200/80 rounded-2xl p-6 hover:shadow-lg hover:shadow-zinc-900/[0.03] transition-all duration-500 overflow-hidden relative">
+        <div className="flex items-center justify-between mb-5">
+           <h3 className="text-[14px] font-bold text-zinc-800 tracking-tight">Academic Timeline</h3>
+           <button className="text-[11px] font-medium text-zinc-400 hover:text-zinc-600 uppercase tracking-wide transition-colors">Clear History</button>
+        </div>
+        
+        <div className="space-y-1 relative">
+          <div className="absolute left-[15px] top-2 bottom-2 w-[1.5px] bg-zinc-50" />
+          {data.activity.map((a, i) => <ActivityRow key={i} {...a} />)}
+        </div>
       </div>
     </div>
   )
