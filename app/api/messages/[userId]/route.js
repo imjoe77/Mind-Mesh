@@ -14,14 +14,18 @@ export async function GET(req, { params }) {
     const { userId } = params;
     await connectDB();
 
-    // Verify they are connected (in each other's following/followers)
-    const me = await User.findById(session.user.id).select("following followers").lean();
-    const isConnected =
-      me?.following?.map(String).includes(userId) ||
-      me?.followers?.map(String).includes(userId);
+    // Verify they are connected (at least one-way following for messaging)
+    const meArr = await User.findById(session.user.id).select("following followers").lean();
+    
+    const myFollowing = (meArr?.following || []).map(id => id.toString());
+    const myFollowers = (meArr?.followers || []).map(id => id.toString());
+    
+    // Check if I follow them or they follow me
+    const isConnected = myFollowing.includes(userId) || myFollowers.includes(userId);
 
     if (!isConnected) {
-      return NextResponse.json({ error: "You can only message your connections" }, { status: 403 });
+      console.warn(`[MESSAGES_403] User ${session.user.id} tried to message ${userId}. Following: ${myFollowing}, Followers: ${myFollowers}`);
+      return NextResponse.json({ error: "Connect with this user to start messaging" }, { status: 403 });
     }
 
     const messages = await Message.find({
@@ -60,13 +64,13 @@ export async function POST(req, { params }) {
     await connectDB();
 
     // Verify they are connected
-    const me = await User.findById(session.user.id).select("following followers").lean();
-    const isConnected =
-      me?.following?.map(String).includes(userId) ||
-      me?.followers?.map(String).includes(userId);
+    const meArr = await User.findById(session.user.id).select("following followers").lean();
+    const myFollowing = (meArr?.following || []).map(id => id.toString());
+    const myFollowers = (meArr?.followers || []).map(id => id.toString());
+    const isConnected = myFollowing.includes(userId) || myFollowers.includes(userId);
 
     if (!isConnected) {
-      return NextResponse.json({ error: "You can only message your connections" }, { status: 403 });
+      return NextResponse.json({ error: "Connect with this user to start messaging" }, { status: 403 });
     }
 
     const message = await Message.create({
