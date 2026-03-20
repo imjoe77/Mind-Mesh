@@ -268,6 +268,17 @@ function PDFPanel({ socket, sessionId, syncedData, featureLocks, session }) {
   const [error,      setError]      = useState("");
   const [dragging,   setDragging]   = useState(false);
   const [ocrUsed,    setOcrUsed]    = useState(false);
+
+  // Listen for synced PDF content (keyPoints + Q&A) from other users
+  useEffect(() => {
+    if (!socket) return;
+    const onContentSync = (data) => {
+      if (data.keyPoints) setKeyPoints(data.keyPoints);
+      if (data.messages) setMessages(data.messages);
+    };
+    socket.on("pdf-content-sync", onContentSync);
+    return () => socket.off("pdf-content-sync", onContentSync);
+  }, [socket]);
   const fileRef   = useRef(null);
   const bottomRef = useRef(null);
 
@@ -338,7 +349,12 @@ ${text.slice(0, 5000)}`;
       const data = await res.json();
       const raw  = (data.reply || "").replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/,"").trim();
       const match = raw.match(/\{[\s\S]*\}/);
-      if (match) setKeyPoints(JSON.parse(match[0]));
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        setKeyPoints(parsed);
+        // Sync key points to all users
+        if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints: parsed, messages: [] });
+      }
     } catch (e) { console.error("[PDF_AUTOEXTRACT]", e); }
   };
 
@@ -360,7 +376,13 @@ ${historyCtx ? `CONVERSATION:\n${historyCtx}\n` : ""}STUDENT QUESTION: ${q}
 Answer based on the document. If predicting beyond what is stated, prefix with "Based on the document, I can infer...". If not in the document, say so honestly.`;
       const res  = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: fullPrompt }) });
       const data = await res.json();
-      setMessages(prev => [...prev, { role: "assistant", text: data.reply || "No response received." }]);
+      const newMsg = { role: "assistant", text: data.reply || "No response received." };
+      setMessages(prev => {
+        const updated = [...prev, newMsg];
+        // Sync Q&A to all users
+        if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints, messages: updated });
+        return updated;
+      });
     } catch (e) {
       console.error("[PDF_QA]", e);
       setError("Failed to get response. Try again.");
@@ -495,40 +517,62 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
 /* ══════════════════════════════════════════════════════════════════
    MEDIA PANEL — WebRTC mesh for multi-user video/screen
 ══════════════════════════════════════════════════════════════════ */
-const ICE_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+const ICE_CFG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
 
-function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, onRequestPermission }) {
+function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, sessionUsers }) {
   const camVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
   const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { stream, userName } }
 
-  // ── Create peer connection to a remote socket ──
-  const createPeer = useCallback((targetSocketId, initiator = false) => {
-    if (peersRef.current[targetSocketId]) return peersRef.current[targetSocketId];
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+  // Refs to avoid stale closures in async WebRTC callbacks
+  const camRef = useRef(camStream);
+  const screenRef = useRef(screenStream);
+  const socketRef = useRef(socket);
+  useEffect(() => { camRef.current = camStream; }, [camStream]);
+  useEffect(() => { screenRef.current = screenStream; }, [screenStream]);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+
+  // ── Helper: get all current local tracks ──
+  const getLocalTracks = () => {
+    const tracks = [];
+    if (camRef.current) camRef.current.getTracks().forEach(t => tracks.push({ track: t, stream: camRef.current }));
+    if (screenRef.current) screenRef.current.getTracks().forEach(t => tracks.push({ track: t, stream: screenRef.current }));
+    return tracks;
+  };
+
+  // ── Create a fresh peer connection to targetSocketId ──
+  const makePeer = (targetSocketId, initiator, userName) => {
+    // Close any existing connection to this peer
+    if (peersRef.current[targetSocketId]) {
+      peersRef.current[targetSocketId].close();
+      delete peersRef.current[targetSocketId];
+    }
+
+    const pc = new RTCPeerConnection(ICE_CFG);
     peersRef.current[targetSocketId] = pc;
 
     // Add our local tracks
-    [camStream, screenStream].forEach(s => {
-      if (s) s.getTracks().forEach(t => pc.addTrack(t, s));
+    getLocalTracks().forEach(({ track, stream }) => {
+      try { pc.addTrack(track, stream); } catch (e) { console.warn("[RTC] addTrack:", e); }
     });
 
     pc.onicecandidate = (e) => {
-      if (e.candidate && socket) {
-        socket.emit("webrtc-ice-candidate", { to: targetSocketId, candidate: e.candidate });
+      if (e.candidate && socketRef.current) {
+        socketRef.current.emit("webrtc-ice-candidate", { to: targetSocketId, candidate: e.candidate });
       }
     };
 
     pc.ontrack = (e) => {
       setRemoteStreams(prev => ({
         ...prev,
-        [targetSocketId]: { stream: e.streams[0], userName: "Peer" }
+        [targetSocketId]: { stream: e.streams[0], userName: userName || prev[targetSocketId]?.userName || "Peer" }
       }));
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+      const s = pc.iceConnectionState;
+      if (s === "disconnected" || s === "failed" || s === "closed") {
         pc.close();
         delete peersRef.current[targetSocketId];
         setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
@@ -537,73 +581,103 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
 
     if (initiator) {
       pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
-        socket.emit("webrtc-offer", {
+        socketRef.current?.emit("webrtc-offer", {
           sessionId, to: targetSocketId, offer: pc.localDescription,
           fromUserId: session?.user?.id, fromUserName: session?.user?.name
         });
-      }).catch(console.error);
+      }).catch(e => console.error("[RTC] offer error:", e));
     }
-    return pc;
-  }, [camStream, screenStream, socket, session, sessionId]);
 
-  // ── Socket event handlers for WebRTC signaling ──
+    return pc;
+  };
+
+  // ── When our streams change → send offers to all session peers ──
+  useEffect(() => {
+    if (!socket || !session?.user?.id) return;
+    const hasStream = camStream || screenStream;
+    if (!hasStream) return;
+
+    // Small delay to let React state settle
+    const timer = setTimeout(() => {
+      (sessionUsers || []).forEach(u => {
+        if (u.socketId && u.socketId !== socket.id) {
+          console.log("[RTC] Initiating connection to", u.userName || u.socketId);
+          makePeer(u.socketId, true, u.userName);
+        }
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camStream, screenStream, sessionUsers, socket, session?.user?.id]);
+
+  // ── Socket signaling handlers ──
   useEffect(() => {
     if (!socket) return;
 
-    const onOffer = async ({ from, offer, fromUserName }) => {
-      const pc = createPeer(from, false);
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit("webrtc-answer", { to: from, answer: pc.localDescription });
-      setRemoteStreams(prev => ({ ...prev, [from]: { ...prev[from], userName: fromUserName || "Peer" } }));
+    const handleOffer = async ({ from, offer, fromUserName }) => {
+      console.log("[RTC] Received offer from", fromUserName || from);
+      const pc = makePeer(from, false, fromUserName);
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit("webrtc-answer", { to: from, answer: pc.localDescription });
+      } catch (e) { console.error("[RTC] answer error:", e); }
     };
 
-    const onAnswer = async ({ from, answer }) => {
+    const handleAnswer = async ({ from, answer }) => {
       const pc = peersRef.current[from];
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    };
-
-    const onIce = async ({ from, candidate }) => {
-      const pc = peersRef.current[from];
-      if (pc) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { console.warn("[ICE]", e); }
+      if (pc && pc.signalingState === "have-local-offer") {
+        try { await pc.setRemoteDescription(new RTCSessionDescription(answer)); }
+        catch (e) { console.error("[RTC] setRemoteDesc error:", e); }
       }
     };
 
-    socket.on("webrtc-offer", onOffer);
-    socket.on("webrtc-answer", onAnswer);
-    socket.on("webrtc-ice-candidate", onIce);
+    const handleIce = async ({ from, candidate }) => {
+      const pc = peersRef.current[from];
+      if (pc && pc.remoteDescription) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+        catch (e) { /* often benign */ }
+      }
+    };
+
+    // When another user signals they started streaming, connect to them
+    const handleMediaStatus = ({ userId, userName, type, status }) => {
+      if (status === "on" && userId !== session?.user?.id) {
+        // The remote user will send us an offer, so we don't need to initiate
+        // But if WE have streams, we should initiate to them too
+        if (camRef.current || screenRef.current) {
+          const targetSocket = (sessionUsers || []).find(u => u.userId === userId);
+          if (targetSocket && !peersRef.current[targetSocket.socketId]) {
+            setTimeout(() => makePeer(targetSocket.socketId, true, userName), 500);
+          }
+        }
+      }
+    };
+
+    socket.on("webrtc-offer", handleOffer);
+    socket.on("webrtc-answer", handleAnswer);
+    socket.on("webrtc-ice-candidate", handleIce);
+    socket.on("media-status", handleMediaStatus);
 
     return () => {
-      socket.off("webrtc-offer", onOffer);
-      socket.off("webrtc-answer", onAnswer);
-      socket.off("webrtc-ice-candidate", onIce);
+      socket.off("webrtc-offer", handleOffer);
+      socket.off("webrtc-answer", handleAnswer);
+      socket.off("webrtc-ice-candidate", handleIce);
+      socket.off("media-status", handleMediaStatus);
     };
-  }, [socket, createPeer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, sessionUsers, session?.user?.id]);
 
-  // ── When our stream changes, renegotiate with all peers ──
-  useEffect(() => {
-    if (!socket) return;
-    // Send offer to all session users when we start streaming
-    const onUsers = (users) => {
-      if (!camStream && !screenStream) return;
-      users.forEach(u => {
-        if (u.socketId !== socket.id) {
-          // Close existing peer and create fresh
-          if (peersRef.current[u.socketId]) { peersRef.current[u.socketId].close(); delete peersRef.current[u.socketId]; }
-          createPeer(u.socketId, true);
-        }
-      });
-    };
-    socket.on("session-users", onUsers);
-    return () => socket.off("session-users", onUsers);
-  }, [camStream, screenStream, socket, createPeer]);
-
+  // ── Camera toggle ──
   const toggleCam = async () => {
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
       setCamStream(null);
+      // Close all peers (they'll reconnect if needed)
+      Object.values(peersRef.current).forEach(pc => pc.close());
+      peersRef.current = {};
+      setRemoteStreams({});
       if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "off" });
     } else {
       try {
@@ -614,10 +688,14 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     }
   };
 
+  // ── Screen share toggle ──
   const toggleScreen = async () => {
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
       setScreenStream(null);
+      Object.values(peersRef.current).forEach(pc => pc.close());
+      peersRef.current = {};
+      setRemoteStreams({});
       if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
     } else {
       try {
@@ -626,6 +704,9 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
         if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "on" });
         s.getVideoTracks()[0].onended = () => {
           setScreenStream(null);
+          Object.values(peersRef.current).forEach(pc => pc.close());
+          peersRef.current = {};
+          setRemoteStreams({});
           if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
         };
       } catch (err) { console.error(err); }
@@ -641,9 +722,8 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
   }, []);
 
   const remoteEntries = Object.entries(remoteStreams);
-  const hasLocalVideo = camStream || screenStream;
   const totalVideos = (camStream ? 1 : 0) + (screenStream ? 1 : 0) + remoteEntries.length;
-  const gridCols = totalVideos <= 1 ? "grid-cols-1" : totalVideos <= 4 ? "grid-cols-2" : "grid-cols-3";
+  const gridCols = totalVideos <= 1 ? "grid-cols-1" : totalVideos <= 4 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-2 md:grid-cols-3";
 
   return (
     <div className="flex flex-col gap-4 p-3 md:p-5 h-full overflow-y-auto">
@@ -659,24 +739,37 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
         </button>
       </div>
 
+      {/* Participant count */}
+      <div className="text-center text-[10px] text-gray-500 font-semibold">
+        {(sessionUsers || []).length} member{(sessionUsers || []).length !== 1 ? "s" : ""} in session
+        {remoteEntries.length > 0 && <span className="text-emerald-400 ml-2">• {remoteEntries.length} connected</span>}
+      </div>
+
       {/* Video grid — Google Meet style */}
       <div className={`grid ${gridCols} gap-3 flex-1`}>
         {camStream && (
           <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
             <video ref={camVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">You (Camera)</div>
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
+              <Camera style={{width: 10, height: 10}} /> You (Camera)
+            </div>
           </div>
         )}
         {screenStream && (
-          <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
+          <div className="relative aspect-video rounded-2xl overflow-hidden border border-sky-500/20 bg-[#0d1117]">
             <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">You (Screen)</div>
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
+              <Monitor style={{width: 10, height: 10}} /> You (Screen)
+            </div>
           </div>
         )}
         {remoteEntries.map(([sid, { stream, userName }]) => (
-          <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
+          <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117]">
             <video autoPlay playsInline className="w-full h-full object-cover" ref={el => { if (el && stream) el.srcObject = stream; }} />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">{userName}</div>
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {userName}
+            </div>
           </div>
         ))}
       </div>
@@ -693,11 +786,10 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
         </div>
       )}
 
-      {/* Online members indicator */}
       <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-3 md:p-5 text-center">
         <h3 className="text-sm font-bold text-sky-400 mb-1">Live Classroom</h3>
         <p className="text-xs text-gray-500 max-w-md mx-auto">
-          Camera and screen share are visible to all members in real-time via WebRTC.
+          Camera and screen share are visible to all members in real-time via peer-to-peer WebRTC.
         </p>
       </div>
     </div>
@@ -787,8 +879,12 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   useEffect(() => {
     fetchMessages();
     if (!socket) return;
+
     // Join the group room so we receive group-chat events
-    socket.emit("join-group", groupId);
+    const joinGroup = () => socket.emit("join-group", groupId);
+    if (socket.connected) joinGroup();
+    socket.on("connect", joinGroup);
+
     const onGroupChat = (msg) => {
       // Deduplicate — don't add if we already have this message (optimistic add)
       if (seenIds.current.has(msg._id)) return;
@@ -797,7 +893,11 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
     };
     socket.on("group-chat", onGroupChat);
     socket.on("new-message", onGroupChat);
-    return () => { socket.off("group-chat", onGroupChat); socket.off("new-message", onGroupChat); };
+    return () => {
+      socket.off("connect", joinGroup);
+      socket.off("group-chat", onGroupChat);
+      socket.off("new-message", onGroupChat);
+    };
   }, [fetchMessages, socket, groupId]);
 
   useEffect(() => {
@@ -830,6 +930,11 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
         seenIds.current.add(msg._id);
         // Replace optimistic message with real one
         setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? msg : m));
+        // Emit via socket so OTHER users in the group room receive it in real-time
+        // (globalThis.__io doesn't work in Next.js 16 API route workers)
+        if (socket) {
+          socket.emit("group-chat", { groupId, message: msg });
+        }
       }
     } catch {}
     finally { setSending(false); }
@@ -1401,9 +1506,7 @@ export default function StudyRoomPage() {
       transports: ["websocket", "polling"],
     });
     setSocket(s);
-    if (sessionId && session?.user) {
-      s.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
-    }
+
     s.on("permission-request", ({ from, type }) => {
       setPermissionRequest({ from, type });
       toast.info(`📢 ${from.name} requested to use ${type}`, { autoClose: 10000 });
@@ -1460,7 +1563,15 @@ export default function StudyRoomPage() {
     return () => {
       s.disconnect();
     };
-  }, [sessionId, session?.user?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Join session + group rooms once socket AND session are both ready
+  useEffect(() => {
+    if (!socket || !session?.user?.id || !sessionId) return;
+    socket.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
+    socket.emit("join-group", groupId);
+  }, [socket, session?.user?.id, sessionId, groupId]);
 
   const handleRequestPermission = (type) => {
     if (!socket || !session?.user) return;
@@ -1583,7 +1694,7 @@ export default function StudyRoomPage() {
           {activeTool==="chat"       && <div className="h-full"><ChatPanel socket={socket} sessionId={sessionId} groupId={groupId} session={session}/></div>}
           {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} featureLocks={featureLocks} session={session} /></div>}
           {activeTool==="quiz"       && <div className="h-full"><QuizPanel socket={socket} sessionId={sessionId} syncedModule={remoteModule} featureLocks={featureLocks} session={session} /></div>}
-          {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} onRequestPermission={handleRequestPermission} /></div>}
+          {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} sessionUsers={sessionUsers} /></div>}
           {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel socket={socket} sessionId={sessionId} /></div>}
           {activeTool==="music"      && <div className="h-full overflow-y-auto"><MusicPanel /></div>}
         </div>
