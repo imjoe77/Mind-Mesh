@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/auth";
 import connectDB from "@/db/connectDB";
 import User from "@/app/models/User";
+import Notification from "@/app/models/Notification";
 
 // POST /api/users/follow — Send a follow request
 export async function POST(req) {
@@ -41,6 +42,24 @@ export async function POST(req) {
       message: message || "",
     });
     await targetUser.save();
+
+    // Create a Notification record
+    await Notification.create({
+      recipient: targetUserId,
+      type: "FOLLOW_REQUEST",
+      title: "🤝 New Connection Request",
+      message: `${currentUser.name} wants to connect with you!`,
+      link: "/discover?tab=requests"
+    });
+
+    // Real-time Emit if Socket is active
+    if (globalThis.__io) {
+      globalThis.__io.to(`user:${targetUserId}`).emit("notification", {
+        type: "FOLLOW_REQUEST",
+        title: "🤝 New Connection Request",
+        message: `${currentUser.name} wants to connect with you!`
+      });
+    }
 
     return NextResponse.json({ message: "Follow request sent!" }, { status: 201 });
   } catch (err) {

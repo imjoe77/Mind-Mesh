@@ -37,7 +37,7 @@ app.prepare().then(() => {
   io.on("connection", (socket) => {
     console.log(`[SOCKET] Client connected: ${socket.id}`);
 
-    // User joins their personal notification room
+    // ── User Specific Rooms ──
     socket.on("join-user", (userId) => {
       if (userId) {
         socket.join(`user:${userId}`);
@@ -45,12 +45,53 @@ app.prepare().then(() => {
       }
     });
 
-    // User joins a group room (for group-wide broadcasts)
     socket.on("join-group", (groupId) => {
       if (groupId) {
         socket.join(`group:${groupId}`);
         console.log(`[SOCKET] Socket ${socket.id} joined group:${groupId}`);
       }
+    });
+
+    // ── Classroom / Room Signaling ──
+    socket.on("join-session", (sessionId) => {
+      if (sessionId) {
+        socket.join(`session:${sessionId}`);
+        console.log(`[SOCKET] User ${socket.id} joined session:${sessionId}`);
+      }
+    });
+
+    // Whiteboard Sync
+    socket.on("draw-data", ({ sessionId, drawingData }) => {
+      socket.to(`session:${sessionId}`).emit("draw-data", drawingData);
+    });
+
+    socket.on("canvas-clear", (sessionId) => {
+      socket.to(`session:${sessionId}`).emit("canvas-clear");
+    });
+
+    // Pomodoro Sync
+    socket.on("pomodoro-sync", ({ sessionId, state }) => {
+      socket.to(`session:${sessionId}`).emit("pomodoro-sync", state);
+    });
+
+    // Media / Screen Sharing signaling
+    socket.on("media-status", ({ sessionId, userId, type, status }) => {
+      // broadcast who is sharing what
+      socket.to(`session:${sessionId}`).emit("media-status", { userId, type, status });
+    });
+
+    socket.on("permission-request", ({ sessionId, from, type }) => {
+      // Send to session owner (or everyone for now)
+      socket.to(`session:${sessionId}`).emit("permission-request", { from, type });
+    });
+
+    socket.on("permission-response", ({ sessionId, to, type, allowed }) => {
+      socket.to(`session:${sessionId}`).emit("permission-response", { to, type, allowed });
+    });
+
+    // Real-time Chat
+    socket.on("send-message", ({ sessionId, message }) => {
+      socket.to(`session:${sessionId}`).emit("new-message", message);
     });
 
     socket.on("disconnect", () => {

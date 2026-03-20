@@ -60,6 +60,7 @@ export default function GroupDetailPage() {
   const [leaving,       setLeaving]       = useState(false);
   const [slotAction,    setSlotAction]    = useState({});
   const [addingComment, setAddingComment] = useState(false);
+  const [showAddSlot, setShowAddSlot] = useState(false);
 
   /* ── all original logic untouched ────────────────────────── */
   useEffect(() => { fetchGroup(); }, [groupId]);
@@ -118,6 +119,30 @@ export default function GroupDetailPage() {
       toast.success("Left session slot.");
     } catch (err) { toast.error(err.message); }
     finally { setSlotAction(p => ({ ...p, [sessionId]: null })); }
+  };
+
+  const handleAddSession = async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const date = formData.get("date");
+    const startTime = formData.get("startTime");
+    const endTime = formData.get("endTime");
+    const note = formData.get("note");
+
+    if (!date || !startTime || !endTime) return toast.error("Please fill in date and times");
+
+    try {
+      const res = await fetch(`/api/groups/${groupId}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, startTime, endTime, note }),
+      });
+      if (!res.ok) throw new Error("Failed to add session");
+      e.target.reset();
+      setShowAddSlot(false);
+      await fetchGroup(true);
+      toast.success("New session slot added!");
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteSlot = async (sessionId) => {
@@ -351,7 +376,44 @@ export default function GroupDetailPage() {
             {/* sessions */}
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.05, ease: [0.22,1,0.36,1] }}>
               <GlassCard className="p-6">
-                <SectionHead icon={Calendar} label="Study Sessions" accent="sky" />
+                <div className="flex items-center justify-between mb-4">
+                  <SectionHead icon={Calendar} label="Sessions" accent="sky" />
+                  {isOwner && (
+                    <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowAddSlot(!showAddSlot)}
+                      className="px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] font-black uppercase tracking-widest hover:bg-sky-500/20 transition-all">
+                      {showAddSlot ? "Cancel" : "Add Session"}
+                    </motion.button>
+                  )}
+                </div>
+
+                {showAddSlot && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mb-6 overflow-hidden">
+                    <form onSubmit={handleAddSession} className="p-4 rounded-xl border border-sky-500/20 bg-sky-500/[0.03] space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-500 uppercase">Date</label>
+                          <input type="date" name="date" required className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white [color-scheme:dark]" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-500 uppercase">Start</label>
+                          <input type="time" name="startTime" required className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white [color-scheme:dark]" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-500 uppercase">End</label>
+                          <input type="time" name="endTime" required className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white [color-scheme:dark]" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-bold text-gray-500 uppercase">Note (Optional)</label>
+                        <input type="text" name="note" placeholder="e.g. Chapter 4 review" className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600" />
+                      </div>
+                      <button type="submit" className="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-all shadow-lg shadow-sky-600/20">
+                        Create Session Slot
+                      </button>
+                    </form>
+                  </motion.div>
+                )}
 
                 {(group.sessions || []).length === 0 ? (
                   <div className="py-14 text-center rounded-xl border border-dashed border-white/[0.07]">

@@ -8,14 +8,15 @@ import {
   Video, Timer, Music2, X, Monitor, Camera,
   Play, Pause, RotateCcw, Trash2, Send,
   ChevronRight, BookOpen, Map, HelpCircle,
-  Link2, Zap, ArrowRight, RefreshCw,
+  Link2, Zap, ArrowRight, RefreshCw, ShieldCheck,
 } from "lucide-react";
 import { toast } from "react-toastify";
+import { io } from "socket.io-client";
 
 /* ══════════════════════════════════════════════════════════════════
    POMODORO
 ══════════════════════════════════════════════════════════════════ */
-function PomodoroPanel() {
+function PomodoroPanel({ socket, sessionId }) {
   const MODES  = { work: 25 * 60, short: 5 * 60, long: 15 * 60 };
   const LABELS = { work: "Focus", short: "Short Break", long: "Long Break" };
   const [mode, setMode]       = useState("work");
@@ -23,6 +24,18 @@ function PomodoroPanel() {
   const [running, setRunning] = useState(false);
   const [cycles, setCycles]   = useState(0);
   const intervalRef           = useRef(null);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onSync = (state) => {
+      setMode(state.mode);
+      setSecs(state.secs);
+      setRunning(state.running);
+      if (state.cycles !== undefined) setCycles(state.cycles);
+    };
+    socket.on("pomodoro-sync", onSync);
+    return () => socket.off("pomodoro-sync", onSync);
+  }, [socket]);
 
   useEffect(() => {
     if (running) {
@@ -42,7 +55,33 @@ function PomodoroPanel() {
     return () => clearInterval(intervalRef.current);
   }, [running]);
 
-  const switchMode = (m) => { setRunning(false); setMode(m); setSecs(MODES[m]); };
+  const emitSync = (updates) => {
+    if (!socket) return;
+    socket.emit("pomodoro-sync", {
+      sessionId,
+      state: { mode, secs, running, cycles, ...updates }
+    });
+  };
+
+  const switchMode = (m) => {
+    setRunning(false);
+    setMode(m);
+    setSecs(MODES[m]);
+    emitSync({ running: false, mode: m, secs: MODES[m] });
+  };
+
+  const toggleRunning = () => {
+    const nextVal = !running;
+    setRunning(nextVal);
+    emitSync({ running: nextVal });
+  };
+
+  const resetTimer = () => {
+    setRunning(false);
+    setSecs(MODES[mode]);
+    emitSync({ running: false, secs: MODES[mode] });
+  };
+
   const mins  = String(Math.floor(secs / 60)).padStart(2, "0");
   const sec2  = String(secs % 60).padStart(2, "0");
   const pct   = ((MODES[mode] - secs) / MODES[mode]) * 100;
@@ -73,13 +112,13 @@ function PomodoroPanel() {
         </div>
       </div>
       <div className="flex gap-3">
-        <button onClick={() => setRunning(r => !r)}
+        <button onClick={toggleRunning}
           className={`flex items-center gap-2 px-7 py-3 rounded-xl font-bold text-sm transition-all ${
             running ? "bg-amber-500/10 border border-amber-500/30 text-amber-400" : "bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/20"
           }`}>
           {running ? <><Pause style={{ width: 15, height: 15 }} />Pause</> : <><Play style={{ width: 15, height: 15 }} />Start</>}
         </button>
-        <button onClick={() => { setRunning(false); setSecs(MODES[mode]); }}
+        <button onClick={resetTimer}
           className="flex items-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white transition-all">
           <RotateCcw style={{ width: 14, height: 14 }} />
         </button>
@@ -95,13 +134,42 @@ function PomodoroPanel() {
 /* ══════════════════════════════════════════════════════════════════
    WHITEBOARD
 ══════════════════════════════════════════════════════════════════ */
-function WhiteboardPanel() {
+function WhiteboardPanel({ socket, sessionId }) {
   const canvasRef = useRef(null);
   const [tool, setTool]   = useState("pen");
   const [color, setColor] = useState("#38bdf8");
   const [size, setSize]   = useState(3);
   const drawing = useRef(false);
   const lastPos = useRef(null);
+
+  const drawOnCanvas = useCallback((data) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = data.tool === "eraser" ? data.size * 5 : data.size;
+    ctx.strokeStyle = data.tool === "eraser" ? "#060810" : data.color;
+    ctx.beginPath();
+    ctx.moveTo(data.from.x, data.from.y);
+    ctx.lineTo(data.to.x, data.to.y);
+    ctx.stroke();
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    socket.on("draw-data", drawOnCanvas);
+    socket.on("canvas-clear", () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#060810";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    });
+    return () => {
+      socket.off("draw-data");
+      socket.off("canvas-clear");
+    };
+  }, [socket, drawOnCanvas]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -123,12 +191,10 @@ function WhiteboardPanel() {
     if (!drawing.current) return;
     e.preventDefault();
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
     const pos = getPos(e, canvas);
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.lineWidth = tool === "eraser" ? size * 5 : size;
-    ctx.strokeStyle = tool === "eraser" ? "#060810" : color;
-    ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(pos.x, pos.y); ctx.stroke();
+    const drawData = { from: lastPos.current, to: pos, color, size, tool };
+    drawOnCanvas(drawData);
+    if (socket) socket.emit("draw-data", { sessionId, drawingData: drawData });
     lastPos.current = pos;
   };
   const stopDraw = () => { drawing.current = false; };
@@ -137,6 +203,7 @@ function WhiteboardPanel() {
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#060810";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (socket) socket.emit("canvas-clear", sessionId);
   };
   const COLORS = ["#38bdf8","#818cf8","#34d399","#f59e0b","#f87171","#e879f9","#ffffff"];
 
@@ -390,42 +457,121 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
 /* ══════════════════════════════════════════════════════════════════
    MEDIA PANEL
 ══════════════════════════════════════════════════════════════════ */
-function MediaPanel({ camStream, setCamStream, screenStream, setScreenStream }) {
+function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, onRequestPermission }) {
   const camVideoRef    = useRef(null);
   const screenVideoRef = useRef(null);
+
   const toggleCam = async () => {
-    if (camStream) { camStream.getTracks().forEach(t => t.stop()); setCamStream(null); }
-    else { try { const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); setCamStream(s); } catch { toast.error("Camera access denied."); } }
+    if (camStream) {
+      camStream.getTracks().forEach(t => t.stop());
+      setCamStream(null);
+      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "camera", status: "off" });
+    }
+    else {
+      // Permission check if others are using camera? 
+      // User said "except for camera all can join at once", so Cam is likely free.
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        setCamStream(s);
+        if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "camera", status: "on" });
+      } catch {
+        toast.error("Camera access denied.");
+      }
+    }
   };
+
+  const startScreenShare = async () => {
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      setScreenStream(s);
+      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "screen", status: "on" });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const toggleScreen = async () => {
-    if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); setScreenStream(null); }
-    else { try { const s = await navigator.mediaDevices.getDisplayMedia({ video: true }); setScreenStream(s); } catch (err) { console.error(err); } }
+    if (screenStream) {
+      screenStream.getTracks().forEach(t => t.stop());
+      setScreenStream(null);
+      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "screen", status: "off" });
+    }
+    else {
+      const sharerId = activeSharers?.screen;
+      if (sharerId && sharerId !== session?.user?.id) {
+        onRequestPermission("screen");
+      } else {
+        await startScreenShare();
+      }
+    }
   };
+
+  useEffect(() => {
+    const handlePermission = (e) => {
+      if (e.detail.type === "screen") {
+        startScreenShare();
+      }
+    };
+    window.addEventListener("permission-granted", handlePermission);
+    return () => window.removeEventListener("permission-granted", handlePermission);
+  }, [session, socket, sessionId]);
+
   useEffect(() => { if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream; }, [camStream]);
   useEffect(() => { if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream; }, [screenStream]);
 
   return (
     <div className="flex flex-col gap-5 p-5 h-full overflow-y-auto">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {[{label:"Camera",stream:camStream,videoRef:camVideoRef,toggle:toggleCam,icon:Camera},{label:"Screen Share",stream:screenStream,videoRef:screenVideoRef,toggle:toggleScreen,icon:Monitor}].map(({label,stream,videoRef,toggle,icon:Icon}) => (
-          <div key={label} className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117] group">
-            {stream ? <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" /> : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-700 gap-2">
-                <Icon style={{ width: 32, height: 32 }} /><p className="text-xs font-semibold">{label} Offline</p>
+        {[
+          { label: "Camera", stream: camStream, videoRef: camVideoRef, toggle: toggleCam, icon: Camera, type: "camera" },
+          { label: "Screen Share", stream: screenStream, videoRef: screenVideoRef, toggle: toggleScreen, icon: Monitor, type: "screen" }
+        ].map(({ label, stream, videoRef, toggle, icon: Icon, type }) => {
+          const isOthersSharing = activeSharers?.[type] && activeSharers[type] !== session?.user?.id;
+
+          return (
+            <div key={label} className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117] group">
+              {stream ? (
+                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-700 gap-2">
+                  <Icon style={{ width: 32, height: 32 }} />
+                  <p className="text-xs font-semibold">{label} Offline</p>
+                  {isOthersSharing && (
+                    <span className="text-[10px] text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                      Someone is presenting
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-3 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="text-[10px] text-white font-bold">{label}</span>
+                <button
+                  onClick={toggle}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                    stream 
+                      ? "bg-rose-500 hover:bg-rose-400" 
+                      : isOthersSharing 
+                        ? "bg-amber-500 hover:bg-amber-400" 
+                        : "bg-sky-600 hover:bg-sky-500"
+                  } text-white`}
+                >
+                  {stream 
+                    ? "Turn Off" 
+                    : isOthersSharing 
+                      ? "Request to Present" 
+                      : "Turn On"
+                  }
+                </button>
               </div>
-            )}
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-3 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-              <span className="text-[10px] text-white font-bold">{label}</span>
-              <button onClick={toggle} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${stream ? "bg-rose-500 hover:bg-rose-400" : "bg-sky-600 hover:bg-sky-500"} text-white`}>
-                {stream ? "Turn Off" : "Turn On"}
-              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-5 text-center">
-        <h3 className="text-sm font-bold text-sky-400 mb-1">Collaborative Session</h3>
-        <p className="text-xs text-gray-500 max-w-sm mx-auto">Toggle your camera and screen to collaborate with group members in real-time.</p>
+        <h3 className="text-sm font-bold text-sky-400 mb-1">Classroom Collaboration</h3>
+        <p className="text-xs text-gray-500 max-w-md mx-auto">
+          Share your camera or screen with the group. If someone is already presenting, you'll need to send a permission request to the active presenter.
+        </p>
       </div>
     </div>
   );
@@ -491,24 +637,88 @@ function MusicPanel() {
 /* ══════════════════════════════════════════════════════════════════
    GROUP CHAT
 ══════════════════════════════════════════════════════════════════ */
-function ChatPanel({ groupId, session }) {
-  const [messages,setMessages]=useState([]);const [input,setInput]=useState("");const [sending,setSending]=useState(false);const bottomRef=useRef(null);
-  const fetchMessages=useCallback(async()=>{try{const res=await fetch(`/api/groups/${groupId}/chat`);if(res.ok){const d=await res.json();setMessages(d.messages||[]);}}catch{}},[groupId]);
-  useEffect(()=>{fetchMessages();const t=setInterval(fetchMessages,4000);return()=>clearInterval(t);},[fetchMessages]);
-  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
-  const send=async()=>{if(!input.trim()||sending)return;setSending(true);try{await fetch(`/api/groups/${groupId}/chat`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:input.trim()})});setInput("");await fetchMessages();}catch{}finally{setSending(false);}};
-  const me=session?.user?.id||session?.user?.email;
+function ChatPanel({ socket, sessionId, groupId, session }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef(null);
+
+  const fetchMessages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/groups/${groupId}/chat`);
+      if (res.ok) {
+        const d = await res.json();
+        setMessages(d.messages || []);
+      }
+    } catch {}
+  }, [groupId]);
+
+  useEffect(() => {
+    fetchMessages();
+    if (!socket) return;
+    const onNewMsg = (msg) => setMessages(prev => [...prev, msg]);
+    socket.on("new-message", onNewMsg);
+    return () => socket.off("new-message", onNewMsg);
+  }, [fetchMessages, socket]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const send = async () => {
+    if (!input.trim() || sending) return;
+    const text = input.trim();
+    setSending(true);
+    try {
+      const res = await fetch(`/api/groups/${groupId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const msg = data.message;
+        // In this implementation, the POST returns the new message object
+        if (socket) socket.emit("send-message", { sessionId, message: msg });
+        setMessages(prev => [...prev, msg]);
+        setInput("");
+      }
+    } catch {}
+    finally { setSending(false); }
+  };
+
+  const me = session?.user?.id || session?.user?.email;
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length===0&&<div className="text-center py-12 text-gray-600 text-sm"><MessageSquare className="mx-auto mb-2 text-gray-700" style={{width:24,height:24}}/>No messages yet — say hi!</div>}
-        {messages.map((m,i)=>{const isMe=String(m.sender?._id||m.sender)===String(me);return(<div key={i} className={`flex gap-2 ${isMe?"flex-row-reverse":""}`}><div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500/40 to-indigo-600/40 border border-white/[0.08] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">{(m.sender?.name||"?")[0].toUpperCase()}</div><div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm ${isMe?"bg-sky-600 text-white rounded-tr-sm":"bg-white/[0.06] text-gray-200 rounded-tl-sm"}`}>{!isMe&&<p className="text-[10px] text-sky-400 font-bold mb-0.5">{m.sender?.name||"Member"}</p>}<p className="leading-relaxed">{m.text}</p></div></div>);})}
-        <div ref={bottomRef}/>
+        {messages.length === 0 && (
+          <div className="text-center py-12 text-gray-600 text-sm">
+            <MessageSquare className="mx-auto mb-2 text-gray-700" style={{ width: 24, height: 24 }} />
+            No messages yet — say hi!
+          </div>
+        )}
+        {messages.map((m, i) => {
+          const isMe = String(m.sender?._id || m.sender) === String(me);
+          return (
+            <div key={i} className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500/40 to-indigo-600/40 border border-white/[0.08] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                {(m.sender?.name || "?")[0].toUpperCase()}
+              </div>
+              <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm ${isMe ? "bg-sky-600 text-white rounded-tr-sm" : "bg-white/[0.06] text-gray-200 rounded-tl-sm"}`}>
+                {!isMe && <p className="text-[10px] text-sky-400 font-bold mb-0.5">{m.sender?.name || "Member"}</p>}
+                <p className="leading-relaxed">{m.text}</p>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
       </div>
       <div className="p-3 border-t border-white/[0.06] flex gap-2">
-        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()} placeholder="Type a message..."
-          className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-sky-500 transition"/>
-        <button onClick={send} disabled={sending} className="w-10 h-10 bg-gradient-to-br from-sky-500 to-indigo-600 text-white rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40"><Send style={{width:15,height:15}}/></button>
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()} placeholder="Type a message..."
+          className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-sky-500 transition" />
+        <button onClick={send} disabled={sending} className="w-10 h-10 bg-gradient-to-br from-sky-500 to-indigo-600 text-white rounded-xl flex items-center justify-center flex-shrink-0 disabled:opacity-40">
+          <Send style={{ width: 15, height: 15 }} />
+        </button>
       </div>
     </div>
   );
@@ -987,7 +1197,7 @@ const TOOLS = [
 ];
 
 export default function StudyRoomPage() {
-  const { groupId }            = useParams();
+  const { groupId, sessionId }  = useParams();
   const { data: session }      = useSession();
   const router                 = useRouter();
   const [activeTool,   setActiveTool]   = useState("whiteboard");
@@ -995,9 +1205,84 @@ export default function StudyRoomPage() {
   const [elapsedSecs,  setElapsedSecs]  = useState(0);
   const [camStream,    setCamStream]    = useState(null);
   const [screenStream, setScreenStream] = useState(null);
+  const [socket,       setSocket]       = useState(null);
+  const [activeSharers, setActiveSharers] = useState({}); // { type: userID }
+  const [permissionRequest, setPermissionRequest] = useState(null);
 
-  useEffect(() => { fetch(`/api/groups/${groupId}`).then(r=>r.json()).then(d=>setGroup(d.group)); }, [groupId]);
-  useEffect(() => { const t=setInterval(()=>setElapsedSecs(s=>s+1),1000); return ()=>clearInterval(t); }, []);
+  useEffect(() => {
+    const s = io();
+    setSocket(s);
+    if (sessionId) {
+      s.emit("join-session", sessionId);
+    }
+    s.on("permission-request", ({ from, type }) => {
+      setPermissionRequest({ from, type });
+      toast.info(`📢 ${from.name} requested to use ${type}`, { autoClose: 10000 });
+    });
+
+    s.on("permission-response", ({ to, type, allowed }) => {
+      if (to === session?.user?.id) {
+        if (allowed) {
+          toast.success(`✅ Permission granted for ${type}!`);
+          // Trigger the feature — for now just simple toast, the component should handle state
+          window.dispatchEvent(new CustomEvent("permission-granted", { detail: { type } }));
+        } else {
+          toast.error(`❌ Permission denied for ${type}.`);
+        }
+      }
+    });
+
+    s.on("media-status", ({ userId, type, status }) => {
+      setActiveSharers(prev => {
+        const next = { ...prev };
+        if (status === "on") next[type] = userId;
+        else if (next[type] === userId) delete next[type];
+        return next;
+      });
+    });
+
+    return () => {
+      s.disconnect();
+    };
+  }, [sessionId, session?.user?.id]);
+
+  const handleRequestPermission = (type) => {
+    if (!socket || !session?.user) return;
+    socket.emit("permission-request", {
+      sessionId,
+      type,
+      from: { id: session.user.id, name: session.user.name }
+    });
+    toast.info(`📤 Request sent to use ${type}...`);
+  };
+
+  const handlePermissionResponse = (allowed) => {
+    if (!permissionRequest || !socket) return;
+    socket.emit("permission-response", {
+      sessionId,
+      to: permissionRequest.from.id,
+      type: permissionRequest.type,
+      allowed
+    });
+    setPermissionRequest(null);
+  };
+
+  useEffect(() => {
+    fetch(`/api/groups/${groupId}`).then(r=>r.json()).then(d=>setGroup(d.group));
+    // XP Increase on room join
+    if (session?.user?.id) {
+      fetch("/api/streak/xp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 10, reason: "Joined study session" })
+      }).catch(e => console.error("XP Error:", e));
+    }
+  }, [groupId, session?.user?.id]);
+
+  useEffect(() => {
+    const t = setInterval(() => setElapsedSecs(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const elapsed = [
     String(Math.floor(elapsedSecs/3600)).padStart(2,"0"),
@@ -1048,15 +1333,54 @@ export default function StudyRoomPage() {
         </header>
 
         <div className="flex-1 overflow-hidden">
-          {activeTool==="whiteboard" && <WhiteboardPanel />}
-          {activeTool==="chat"       && <div className="h-full"><ChatPanel groupId={groupId} session={session}/></div>}
+          {activeTool==="whiteboard" && <WhiteboardPanel socket={socket} sessionId={sessionId} />}
+          {activeTool==="chat"       && <div className="h-full"><ChatPanel socket={socket} sessionId={sessionId} groupId={groupId} session={session}/></div>}
           {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel /></div>}
           {activeTool==="quiz"       && <div className="h-full"><QuizPanel /></div>}
-          {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream}/></div>}
-          {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel /></div>}
+          {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} onRequestPermission={handleRequestPermission} /></div>}
+          {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel socket={socket} sessionId={sessionId} /></div>}
           {activeTool==="music"      && <div className="h-full overflow-y-auto"><MusicPanel /></div>}
         </div>
       </main>
+
+      {/* Permission Request Modal */}
+      <AnimatePresence>
+        {permissionRequest && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-24 right-8 z-[100] w-80 p-5 rounded-2xl border border-sky-500/30 bg-[#0d1117] shadow-2xl shadow-sky-500/10"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center">
+                <ShieldCheck className="text-sky-400" size={20} />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Permission Request</p>
+                <p className="text-sm font-bold text-white tracking-tight">{permissionRequest.from.name}</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mb-6 leading-relaxed">
+              Wants permission to use the <b>{permissionRequest.type}</b> feature. Grant access?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handlePermissionResponse(false)}
+                className="flex-1 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 text-xs font-bold hover:text-white hover:bg-white/[0.06] transition-all"
+              >
+                Deny
+              </button>
+              <button
+                onClick={() => handlePermissionResponse(true)}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-xs font-bold shadow-lg shadow-sky-500/20 px-4"
+              >
+                Allow Access
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
