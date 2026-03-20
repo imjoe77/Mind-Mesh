@@ -168,7 +168,6 @@ export default function GroupDetailPage() {
       if (!res.ok) throw new Error("Failed to post comment");
       e.target.reset();
       await fetchGroup(true);
-      toast.success("Comment posted!");
     } catch (err) { toast.error(err.message); }
     finally { setAddingComment(false); }
   };
