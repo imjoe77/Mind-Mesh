@@ -245,9 +245,17 @@ function WhiteboardPanel({ socket, sessionId }) {
    Step 1: Upload → /api/pdf → pdfreader extracts real text
    Step 2: Q&A → /api/chat → OpenRouter Llama with full doc context
 ══════════════════════════════════════════════════════════════════ */
-function PDFPanel() {
+function PDFPanel({ socket, sessionId, syncedData }) {
   const [fileName,   setFileName]   = useState("");
   const [docText,    setDocText]    = useState("");
+  const [uploading,  setUploading]  = useState(false);
+
+  useEffect(() => {
+    if (syncedData?.docText) {
+      setFileName(syncedData.fileName);
+      setDocText(syncedData.docText);
+    }
+  }, [syncedData]);
   const [question,   setQuestion]   = useState("");
   const [messages,   setMessages]   = useState([]);
   const [loading,    setLoading]    = useState(false);
@@ -285,6 +293,10 @@ function PDFPanel() {
       }
       setDocText(text);
       setOcrUsed(false);
+      // Emit sync for other users
+      if (socket) {
+        socket.emit("pdf-sync", { sessionId, fileName: file.name, docText: text });
+      }
       await autoExtract(text);
     } catch (e) {
       console.error("[PDF_UPLOAD]", e);
@@ -947,12 +959,19 @@ const TUTOR_TABS = [
   { id: "resources", label: "Resources", icon: Link2      },
 ];
 
-function QuizPanel() {
+function QuizPanel({ socket, sessionId, syncedModule }) {
   const [topic,     setTopic]     = useState("");
   const [loading,   setLoading]   = useState(false);
   const [module,    setModule]    = useState(null);
   const [activeTab, setActiveTab] = useState("intro");
   const [error,     setError]     = useState("");
+
+  useEffect(() => {
+    if (syncedModule) {
+      setModule(syncedModule);
+      setTopic(syncedModule.topic || "");
+    }
+  }, [syncedModule]);
 
   const generate = async () => {
     const t = topic.trim();
@@ -972,8 +991,13 @@ function QuizPanel() {
       const parsed = JSON.parse(jsonMatch[0]);
       // merge AI resource suggestions with auto-generated real links
       parsed._realLinks = buildResourceLinks(t);
+      parsed.topic = t;
       setModule(parsed);
       setActiveTab("intro");
+
+      if (socket) {
+        socket.emit("ai-tutor-sync", { sessionId, module: parsed });
+      }
     } catch (err) {
       console.error("[TutorAI]", err);
       setError("Couldn't generate module. Try a more specific topic or retry.");
@@ -1207,8 +1231,12 @@ export default function StudyRoomPage() {
   const [camStream,    setCamStream]    = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [socket,       setSocket]       = useState(null);
-  const [activeSharers, setActiveSharers] = useState({}); // { type: userID }
-  const [permissionRequest, setPermissionRequest] = useState(null);
+  const [activeSharers, setActiveSharers] = useState({}); // { type: userID, name: userName }
+  const [sessionUsers, setSessionUsers] = useState([]);
+  const [remoteModule, setRemoteModule] = useState(null);
+  const [remotePdf, setRemotePdf] = useState({ fileName: "", docText: "" });
+  const [peers, setPeers] = useState({}); // { socketId: RTCPeerConnection }
+  const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { type: Stream } }
 
   useEffect(() => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
@@ -1237,11 +1265,21 @@ export default function StudyRoomPage() {
       }
     });
 
-    s.on("media-status", ({ userId, type, status }) => {
+    s.on("ai-tutor-sync", (mod) => {
+      setRemoteModule(mod);
+      toast.info("🧠 AI Tutor module updated by sync!");
+    });
+
+    s.on("pdf-sync", (data) => {
+      setRemotePdf(data);
+      toast.info(`📄 PDF "${data.fileName}" synced!`);
+    });
+
+    s.on("media-status", ({ userId, name, type, status }) => {
       setActiveSharers(prev => {
         const next = { ...prev };
-        if (status === "on") next[type] = userId;
-        else if (next[type] === userId) delete next[type];
+        if (status === "on") next[type] = { userId, name };
+        else if (next[type]?.userId === userId) delete next[type];
         return next;
       });
     });
@@ -1304,15 +1342,21 @@ export default function StudyRoomPage() {
           <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
         </button>
         <div className="w-8 h-px bg-white/[0.06] mb-1" />
-        {TOOLS.map(({ id, icon: Icon, label }) => (
-          <button key={id} onClick={() => setActiveTool(id)} title={label}
-            className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${
-              activeTool === id ? "bg-gradient-to-br from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20" : "text-gray-600 hover:bg-white/[0.06] hover:text-gray-300"
-            }`}>
-            <Icon style={{ width: 18, height: 18 }} />
-            <span className="text-[8px] font-semibold tracking-wide">{label}</span>
-          </button>
-        ))}
+        {TOOLS.map(({ id, icon: Icon, label }) => {
+          const isActive = activeSharers[id] || (id === "pdf" && remotePdf.docText) || (id === "quiz" && remoteModule);
+          return (
+            <button key={id} onClick={() => setActiveTool(id)} title={label}
+              className={`relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${
+                activeTool === id ? "bg-gradient-to-br from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20" : "text-gray-600 hover:bg-white/[0.06] hover:text-gray-300"
+              }`}>
+              <Icon style={{ width: 18, height: 18 }} />
+              <span className="text-[8px] font-semibold tracking-wide">{label}</span>
+              {isActive && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#0b0f1a] animate-pulse" />
+              )}
+            </button>
+          );
+        })}
         <div className="flex-1" />
         <button onClick={() => router.push(`/groups/${groupId}`)} title="Leave Room"
           className="w-12 h-12 rounded-xl flex items-center justify-center text-gray-600 hover:bg-rose-500/10 hover:text-rose-400 transition-all">
@@ -1340,8 +1384,8 @@ export default function StudyRoomPage() {
         <div className="flex-1 overflow-hidden">
           {activeTool==="whiteboard" && <WhiteboardPanel socket={socket} sessionId={sessionId} />}
           {activeTool==="chat"       && <div className="h-full"><ChatPanel socket={socket} sessionId={sessionId} groupId={groupId} session={session}/></div>}
-          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel /></div>}
-          {activeTool==="quiz"       && <div className="h-full"><QuizPanel /></div>}
+          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} /></div>}
+          {activeTool==="quiz"       && <div className="h-full"><QuizPanel socket={socket} sessionId={sessionId} syncedModule={remoteModule} /></div>}
           {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} onRequestPermission={handleRequestPermission} /></div>}
           {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel socket={socket} sessionId={sessionId} /></div>}
           {activeTool==="music"      && <div className="h-full overflow-y-auto"><MusicPanel /></div>}

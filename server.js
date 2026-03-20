@@ -57,7 +57,17 @@ app.prepare().then(() => {
       if (sessionId) {
         socket.join(`session:${sessionId}`);
         console.log(`[SOCKET] User ${socket.id} joined session:${sessionId}`);
+        
+        // Broadcast user list to the room
+        const clients = io.sockets.adapter.rooms.get(`session:${sessionId}`);
+        const userList = clients ? Array.from(clients) : [];
+        io.to(`session:${sessionId}`).emit("session-users", userList);
       }
+    });
+
+    // ── Generic Forwarding ──
+    socket.on("active-tool-sync", ({ sessionId, toolId, data }) => {
+      socket.to(`session:${sessionId}`).emit("active-tool-sync", { toolId, data });
     });
 
     // Whiteboard Sync
@@ -89,9 +99,36 @@ app.prepare().then(() => {
       socket.to(`session:${sessionId}`).emit("permission-response", { to, type, allowed });
     });
 
-    // Real-time Chat
-    socket.on("send-message", ({ sessionId, message }) => {
-      socket.to(`session:${sessionId}`).emit("new-message", message);
+    // AI Tutor Sync
+    socket.on("ai-tutor-sync", ({ sessionId, module }) => {
+      console.log(`[AI] Syncing module for session: ${sessionId}`);
+      socket.to(`session:${sessionId}`).emit("ai-tutor-sync", module);
+    });
+
+    // PDF Sync
+    socket.on("pdf-sync", ({ sessionId, fileName, docText }) => {
+      console.log(`[PDF] Syncing doc for session: ${sessionId}`);
+      socket.to(`session:${sessionId}`).emit("pdf-sync", { fileName, docText });
+    });
+
+    // WebRTC Signaling
+    socket.on("webrtc-signal", ({ sessionId, to, signal }) => {
+      if (to) {
+        io.to(`user:${to}`).emit("webrtc-signal", { from: socket.id, signal });
+      } else {
+        socket.to(`session:${sessionId}`).emit("webrtc-signal", { from: socket.id, signal });
+      }
+    });
+
+    socket.on("disconnecting", () => {
+      socket.rooms.forEach(room => {
+        if (room.startsWith("session:")) {
+          // get the room and subtract this user
+          const clients = io.sockets.adapter.rooms.get(room);
+          const userList = clients ? Array.from(clients).filter(id => id !== socket.id) : [];
+          io.to(room).emit("session-users", userList);
+        }
+      });
     });
 
     socket.on("disconnect", () => {
