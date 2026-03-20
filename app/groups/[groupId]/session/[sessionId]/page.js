@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { io } from "socket.io-client";
+import { motion, AnimatePresence } from "framer-motion";
 
 /* ══════════════════════════════════════════════════════════════════
    POMODORO
