@@ -18,12 +18,18 @@ const handle = app.getRequestHandler();
 let io;
 
 // ── Per-session lock state for AI / PDF features ──
-// { [sessionId]: { ai: { userId, userName } | null, pdf: { userId, userName } | null } }
+// Store locks: { sessionId: { feature: { userId, userName } } }
 const sessionLocks = {};
-
 function getSessionLocks(sessionId) {
-  if (!sessionLocks[sessionId]) sessionLocks[sessionId] = { ai: null, pdf: null };
+  if (!sessionLocks[sessionId]) sessionLocks[sessionId] = { ai: null, pdf: null, whiteboard: null };
   return sessionLocks[sessionId];
+}
+
+// Store session tools data so it persists on refresh
+const sessionDataMap = {}; // { sessionId: { aiModule: null, pdfDoc: null, pdfContent: null } }
+function getSessionData(sessionId) {
+  if (!sessionDataMap[sessionId]) sessionDataMap[sessionId] = { aiModule: null, pdfDoc: null, pdfContent: null };
+  return sessionDataMap[sessionId];
 }
 
 // ── Track which user is behind each socket ──
@@ -94,6 +100,12 @@ app.prepare().then(() => {
         // Send current lock state to the newly joined user
         const locks = getSessionLocks(sessionId);
         socket.emit("feature-lock-state", locks);
+        
+        // Send current active tool data if exists (so it doesn't clear on refresh)
+        const sessionData = getSessionData(sessionId);
+        if (sessionData.aiModule) socket.emit("ai-tutor-sync", sessionData.aiModule);
+        if (sessionData.pdfDoc) socket.emit("pdf-sync", sessionData.pdfDoc);
+        if (sessionData.pdfContent) socket.emit("pdf-content-sync", sessionData.pdfContent);
       }
     });
 
@@ -174,17 +186,25 @@ app.prepare().then(() => {
     // AI Tutor Sync
     socket.on("ai-tutor-sync", ({ sessionId, module }) => {
       console.log(`[AI] Syncing module for session: ${sessionId}`);
+      const data = getSessionData(sessionId);
+      data.aiModule = module; // Save on server
       socket.to(`session:${sessionId}`).emit("ai-tutor-sync", module);
     });
 
     // PDF Sync
     socket.on("pdf-sync", ({ sessionId, fileName, docText }) => {
       console.log(`[PDF] Syncing doc for session: ${sessionId}`);
+      const data = getSessionData(sessionId);
+      data.pdfDoc = { fileName, docText };
       socket.to(`session:${sessionId}`).emit("pdf-sync", { fileName, docText });
     });
 
     // PDF Content Sync (key points + Q&A messages)
     socket.on("pdf-content-sync", ({ sessionId, keyPoints, messages }) => {
+      const data = getSessionData(sessionId);
+      if (!data.pdfContent) data.pdfContent = {};
+      if (keyPoints) data.pdfContent.keyPoints = keyPoints;
+      if (messages) data.pdfContent.messages = messages;
       socket.to(`session:${sessionId}`).emit("pdf-content-sync", { keyPoints, messages });
     });
 

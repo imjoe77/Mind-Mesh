@@ -38,170 +38,6 @@ function Avatar({ user, className = "", size = 40 }) {
   );
 }
 
-// ─── Chat Panel ────────────────────────────────────────────────────────────
-function ChatPanel({ connection, myId, onClose, socket }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const bottomRef = useRef(null);
-  const pollRef = useRef(null);
-
-  const fetchMessages = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/messages/${connection._id}`);
-      const data = await res.json();
-      if (res.ok) setMessages(data.messages || []);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
-  }, [connection._id]);
-
-  useEffect(() => {
-    fetchMessages();
-    pollRef.current = setInterval(fetchMessages, 3000);
-    // Listen for incoming DMs via socket
-    const handleNewMessage = (e) => {
-      const detail = e.detail;
-      if (detail.from === connection._id || detail.from?.toString() === connection._id) {
-        fetchMessages();
-      }
-    };
-    window.addEventListener("new-message", handleNewMessage);
-    // Also listen directly on socket for dm-message
-    const handleDm = (msg) => {
-      if (msg.from === connection._id || msg.from?.toString() === connection._id) {
-        setMessages(prev => {
-          // Avoid duplicates
-          if (prev.some(m => m._id === msg._id)) return prev;
-          return [...prev, msg];
-        });
-      }
-    };
-    if (socket) socket.on("dm-message", handleDm);
-    return () => {
-      clearInterval(pollRef.current);
-      window.removeEventListener("new-message", handleNewMessage);
-      if (socket) socket.off("dm-message", handleDm);
-    };
-  }, [fetchMessages, connection._id, socket]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || sending) return;
-    // Optimistic add — show message instantly
-    const optimisticMsg = {
-      _id: "opt_" + Date.now(),
-      from: myId,
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, optimisticMsg]);
-    setSending(true); setInput("");
-    try {
-      const res = await fetch(`/api/messages/${connection._id}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        // Replace optimistic message with real one
-        setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? data.message : m));
-        // Emit via socket so the OTHER user gets it in real-time
-        if (socket) {
-          socket.emit("dm-message", {
-            to: connection._id,
-            message: data.message
-          });
-        }
-      } else {
-        // Remove optimistic message on failure
-        setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
-        const errData = await res.json().catch(() => ({}));
-        console.error("Message send failed:", res.status, errData);
-      }
-    } catch (err) {
-      console.error(err);
-      setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
-    }
-    finally { setSending(false); }
-  };
-
-  const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-  return (
-    <div className="flex flex-col h-[520px] rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06] bg-white/[0.02]">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 overflow-hidden flex-shrink-0">
-          <Avatar user={connection} size={36} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">{connection.name}</p>
-          <p className="text-[10px] text-emerald-400 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />Connected
-          </p>
-        </div>
-        <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/[0.06]">
-          <X style={{ width: 15, height: 15 }} />
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-2">
-            <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
-              <MessageCircle className="text-sky-400" style={{ width: 20, height: 20 }} />
-            </div>
-            <p className="text-gray-400 text-sm font-medium">Say hi to {connection.name}!</p>
-            <p className="text-gray-600 text-xs">Start a conversation or create a study group together.</p>
-          </div>
-        ) : (
-          messages.map((msg) => {
-            const isMe = msg.from === myId || msg.from?.toString() === myId;
-            return (
-              <div key={msg._id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
-                  isMe ? "bg-sky-600 text-white rounded-br-sm" : "bg-white/[0.07] text-gray-200 rounded-bl-sm"
-                }`}>
-                  <p className="leading-relaxed">{msg.content}</p>
-                  <p className={`text-[9px] mt-1 ${isMe ? "text-sky-200" : "text-gray-500"}`}>{formatTime(msg.createdAt)}</p>
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input */}
-      <div className="p-3 border-t border-white/[0.06] bg-white/[0.02] flex gap-2">
-        <input
-          type="text" value={input} onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
-          placeholder="Type a message..."
-          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-2 text-sm text-gray-200 placeholder-gray-600 focus:ring-1 focus:ring-sky-500 outline-none transition-all"
-        />
-        <motion.button
-          whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-          onClick={handleSend} disabled={!input.trim() || sending}
-          className="w-9 h-9 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-30 text-white transition-colors flex items-center justify-center flex-shrink-0"
-        >
-          <svg className="w-4 h-4 rotate-45" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
-          </svg>
-        </motion.button>
-      </div>
-    </div>
-  );
-}
-
 
 // ─── Tinder Swipe Card ─────────────────────────────────────────────────────
 function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
@@ -427,7 +263,6 @@ export default function DiscoverPage() {
   const [respondingTo, setRespondingTo] = useState(null);
 
   const [openChat, setOpenChat] = useState(null);
-  const [unreadMap, setUnreadMap] = useState({});
 
   const fetchDiscover = useCallback(async () => {
     setLoading(true);
@@ -907,17 +742,7 @@ export default function DiscoverPage() {
                           </div>
                         </div>
                         <div className="flex flex-col gap-2 flex-shrink-0">
-                          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
-                            onClick={() => setOpenChat(isActive ? null : conn)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                              isActive
-                                ? "bg-sky-600 text-white"
-                                : "bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-sky-600 hover:border-sky-600"
-                            }`}
-                          >
-                            <MessageCircle style={{ width: 12, height: 12 }} />
-                            {isActive ? "Close" : "Message"}
-                          </motion.button>
+                          {/* Message button removed as per request */}
                           <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                             onClick={() => router.push(`/groups/create?inviteId=${conn._id}&inviteName=${encodeURIComponent(conn.name)}`)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-600 transition-all"
@@ -933,25 +758,7 @@ export default function DiscoverPage() {
               )}
             </div>
 
-            {/* Chat panel */}
-            {openChat && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                className="sticky top-24 space-y-3"
-              >
-                <ChatPanel connection={openChat} myId={session?.user?.id} onClose={() => setOpenChat(null)} socket={globalSocket} />
-                <div className="p-4 rounded-2xl border border-white/[0.07] bg-indigo-500/[0.04] text-center">
-                  <p className="text-xs text-gray-500 mb-3">Want to study together?</p>
-                  <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                    onClick={() => router.push(`/groups/create?inviteId=${openChat._id}&inviteName=${encodeURIComponent(openChat.name)}`)}
-                    className="w-full py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg shadow-sky-500/15">
-                    Create Study Group with {openChat.name} →
-                  </motion.button>
-                </div>
-              </motion.div>
-            )}
+            {/* Default prompt when Study Group button clicked can be shown here if needed, but the button navigates away. */}
           </div>
         )}
 

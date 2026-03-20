@@ -249,7 +249,7 @@ function WhiteboardPanel({ socket, sessionId }) {
    Step 1: Upload → /api/pdf → pdfreader extracts real text
    Step 2: Q&A → /api/chat → OpenRouter Llama with full doc context
 ══════════════════════════════════════════════════════════════════ */
-function PDFPanel({ socket, sessionId, syncedData, featureLocks, session }) {
+function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, session }) {
   const [fileName,   setFileName]   = useState("");
   const [docText,    setDocText]    = useState("");
   const [uploading,  setUploading]  = useState(false);
@@ -260,6 +260,7 @@ function PDFPanel({ socket, sessionId, syncedData, featureLocks, session }) {
       setDocText(syncedData.docText);
     }
   }, [syncedData]);
+
   const [question,   setQuestion]   = useState("");
   const [messages,   setMessages]   = useState([]);
   const [loading,    setLoading]    = useState(false);
@@ -269,7 +270,15 @@ function PDFPanel({ socket, sessionId, syncedData, featureLocks, session }) {
   const [dragging,   setDragging]   = useState(false);
   const [ocrUsed,    setOcrUsed]    = useState(false);
 
-  // Listen for synced PDF content (keyPoints + Q&A) from other users
+  // Restore content from global sync if available (eg. on joining session)
+  useEffect(() => {
+    if (syncedContent) {
+      if (syncedContent.keyPoints) setKeyPoints(syncedContent.keyPoints);
+      if (syncedContent.messages) setMessages(syncedContent.messages);
+    }
+  }, [syncedContent]);
+
+  // Listen for synced PDF content (keyPoints + Q&A) from other users while panel is open
   useEffect(() => {
     if (!socket) return;
     const onContentSync = (data) => {
@@ -1496,6 +1505,7 @@ export default function StudyRoomPage() {
   const [permissionRequest, setPermissionRequest] = useState(null);
   const [remoteModule, setRemoteModule] = useState(null);
   const [remotePdf, setRemotePdf] = useState({ fileName: "", docText: "" });
+  const [remotePdfContent, setRemotePdfContent] = useState(null);
   const [featureLocks, setFeatureLocks] = useState({ ai: null, pdf: null });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -1525,12 +1535,14 @@ export default function StudyRoomPage() {
 
     s.on("ai-tutor-sync", (mod) => {
       setRemoteModule(mod);
-      toast.info("🧠 AI Tutor module updated by sync!");
     });
 
     s.on("pdf-sync", (data) => {
       setRemotePdf(data);
-      toast.info(`📄 PDF \"${data.fileName}\" synced!`);
+    });
+
+    s.on("pdf-content-sync", (data) => {
+      setRemotePdfContent(data);
     });
 
     s.on("media-status", ({ userId, userName, type, status }) => {
@@ -1692,7 +1704,7 @@ export default function StudyRoomPage() {
         <div className="flex-1 overflow-hidden">
           {activeTool==="whiteboard" && <WhiteboardPanel socket={socket} sessionId={sessionId} />}
           {activeTool==="chat"       && <div className="h-full"><ChatPanel socket={socket} sessionId={sessionId} groupId={groupId} session={session}/></div>}
-          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} featureLocks={featureLocks} session={session} /></div>}
+          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} syncedContent={remotePdfContent} featureLocks={featureLocks} session={session} /></div>}
           {activeTool==="quiz"       && <div className="h-full"><QuizPanel socket={socket} sessionId={sessionId} syncedModule={remoteModule} featureLocks={featureLocks} session={session} /></div>}
           {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} sessionUsers={sessionUsers} /></div>}
           {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel socket={socket} sessionId={sessionId} /></div>}
