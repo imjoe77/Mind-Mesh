@@ -1211,7 +1211,11 @@ export default function StudyRoomPage() {
   const [permissionRequest, setPermissionRequest] = useState(null);
 
   useEffect(() => {
-    const s = io();
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+    const s = io(backendUrl, {
+      path: "/api/socketio",
+      transports: ["websocket", "polling"],
+    });
     setSocket(s);
     if (sessionId) {
       s.emit("join-session", sessionId);
