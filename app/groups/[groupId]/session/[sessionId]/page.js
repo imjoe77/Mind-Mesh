@@ -1535,10 +1535,12 @@ export default function StudyRoomPage() {
 
     s.on("ai-tutor-sync", (mod) => {
       setRemoteModule(mod);
+      toast.info("🧠 AI Tutor module updated by sync!");
     });
 
     s.on("pdf-sync", (data) => {
       setRemotePdf(data);
+      toast.info(`📄 PDF \"${data.fileName}\" synced!`);
     });
 
     s.on("pdf-content-sync", (data) => {
