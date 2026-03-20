@@ -7,11 +7,13 @@
   
   Install: npm install pdf-parse pdfreader
 */
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 
 /* ── pdf-parse extractor ── */
 async function extractWithPdfParse(buffer) {
   try {
-    const pdfParse = (await import("pdf-parse")).default;
+    const pdfParse = require("pdf-parse");
     const result   = await pdfParse(buffer, { max: 0 }); // max:0 = all pages
     return result.text?.trim() || "";
   } catch (e) {
