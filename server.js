@@ -103,6 +103,12 @@ app.prepare().then(() => {
       socket.to(`group:${groupId}`).emit("group-chat", message);
     });
 
+    // ── Direct Messages — forward to target user ──
+    socket.on("dm-message", ({ to, message }) => {
+      // Send to the target user's personal room
+      io.to(`user:${to}`).emit("dm-message", message);
+    });
+
     // ── Generic Forwarding ──
     socket.on("active-tool-sync", ({ sessionId, toolId, data }) => {
       socket.to(`session:${sessionId}`).emit("active-tool-sync", { toolId, data });
@@ -175,6 +181,11 @@ app.prepare().then(() => {
     socket.on("pdf-sync", ({ sessionId, fileName, docText }) => {
       console.log(`[PDF] Syncing doc for session: ${sessionId}`);
       socket.to(`session:${sessionId}`).emit("pdf-sync", { fileName, docText });
+    });
+
+    // PDF Content Sync (key points + Q&A messages)
+    socket.on("pdf-content-sync", ({ sessionId, keyPoints, messages }) => {
+      socket.to(`session:${sessionId}`).emit("pdf-content-sync", { keyPoints, messages });
     });
 
     // ── WebRTC Signaling (mesh) ──
