@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 // Removed import io from "socket.io-client" to bypass npm issues
 
@@ -12,7 +12,7 @@ export function useSocket() {
 
 export default function SocketProvider({ children }) {
   const { data: session } = useSession();
-  const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
@@ -25,46 +25,51 @@ export default function SocketProvider({ children }) {
     }
 
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
-    const socket = window.io(backendUrl, {
+    const s = window.io(backendUrl, {
       path: "/api/socketio",
       transports: ["websocket", "polling"],
     });
 
-    socket.on("connect", () => {
-      console.log("[SOCKET] Connected:", socket.id);
+    s.on("connect", () => {
+      console.log("[SOCKET] Connected:", s.id);
       setConnected(true);
       // Join personal notification room
-      socket.emit("join-user", session.user.id);
+      s.emit("join-user", session.user.id);
     });
 
-    socket.on("disconnect", () => {
+    s.on("disconnect", () => {
       console.log("[SOCKET] Disconnected");
       setConnected(false);
     });
 
     // When a session is activated, trigger a notification refresh
-    socket.on("session-activated", (data) => {
+    s.on("session-activated", (data) => {
       console.log("[SOCKET] Session activated!", data);
-      // Dispatch a custom event that NotificationBell can listen to
       window.dispatchEvent(new CustomEvent("session-activated", { detail: data }));
     });
 
     // When a message is received
-    socket.on("new-message", (data) => {
+    s.on("new-message", (data) => {
       console.log("[SOCKET] New message received!", data);
       window.dispatchEvent(new CustomEvent("new-message", { detail: data }));
     });
 
-    socketRef.current = socket;
+    // When a direct message is received
+    s.on("dm-message", (data) => {
+      console.log("[SOCKET] DM received!", data);
+      window.dispatchEvent(new CustomEvent("new-message", { detail: data }));
+    });
+
+    setSocket(s);
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      s.disconnect();
+      setSocket(null);
     };
   }, [session?.user?.id]);
 
   return (
-    <SocketContext.Provider value={{ socket: socketRef.current, connected }}>
+    <SocketContext.Provider value={{ socket, connected }}>
       {children}
     </SocketContext.Provider>
   );
