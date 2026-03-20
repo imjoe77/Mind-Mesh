@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -8,7 +8,7 @@ import {
   Video, Timer, Music2, X, Monitor, Camera,
   Play, Pause, RotateCcw, Trash2, Send,
   ChevronRight, BookOpen, Map, HelpCircle,
-  Link2, Zap, ArrowRight, RefreshCw, ShieldCheck,
+  Link2, Zap, ArrowRight, RefreshCw, ShieldCheck, Menu, Lock,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { io } from "socket.io-client";
@@ -74,6 +74,10 @@ function PomodoroPanel({ socket, sessionId }) {
   const toggleRunning = () => {
     const nextVal = !running;
     setRunning(nextVal);
+    if (nextVal) {
+      // Starting the timer — broadcast to ALL so everyone gets redirected
+      if (socket) socket.emit("pomodoro-start", { sessionId, state: { mode, secs, running: true, cycles } });
+    }
     emitSync({ running: nextVal });
   };
 
@@ -245,7 +249,7 @@ function WhiteboardPanel({ socket, sessionId }) {
    Step 1: Upload → /api/pdf → pdfreader extracts real text
    Step 2: Q&A → /api/chat → OpenRouter Llama with full doc context
 ══════════════════════════════════════════════════════════════════ */
-function PDFPanel({ socket, sessionId, syncedData }) {
+function PDFPanel({ socket, sessionId, syncedData, featureLocks, session }) {
   const [fileName,   setFileName]   = useState("");
   const [docText,    setDocText]    = useState("");
   const [uploading,  setUploading]  = useState(false);
@@ -267,10 +271,25 @@ function PDFPanel({ socket, sessionId, syncedData }) {
   const fileRef   = useRef(null);
   const bottomRef = useRef(null);
 
+  const pdfLock = featureLocks?.pdf;
+  const isLockedByOther = pdfLock && pdfLock.userId !== session?.user?.id;
+  const isLockedByMe = pdfLock && pdfLock.userId === session?.user?.id;
+
+  const acquireLock = () => {
+    if (!socket || isLockedByMe) return true;
+    if (isLockedByOther) { toast.error(`\ud83d\udd12 PDF is being used by ${pdfLock.userName}`); return false; }
+    socket.emit("feature-lock", { sessionId, feature: "pdf", userId: session?.user?.id, userName: session?.user?.name });
+    return true;
+  };
+  const releaseLock = () => {
+    if (socket && isLockedByMe) socket.emit("feature-unlock", { sessionId, feature: "pdf", userId: session?.user?.id });
+  };
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
 
   const handleFile = async (file) => {
     if (!file) return;
+    if (!acquireLock()) return;
     setMessages([]); setKeyPoints(null); setError(""); setDocText(""); setFileName(file.name);
     setExtracting(true);
     try {
@@ -350,11 +369,17 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
   };
 
   const onDrop = (e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); };
-  const reset  = () => { setDocText(""); setFileName(""); setMessages([]); setKeyPoints(null); setError(""); setOcrUsed(false); };
+  const reset  = () => { setDocText(""); setFileName(""); setMessages([]); setKeyPoints(null); setError(""); setOcrUsed(false); releaseLock(); };
   const hasDoc = !!docText;
 
   return (
     <div className="flex flex-col h-full">
+      {isLockedByOther && (
+        <div className="px-4 py-3 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2">
+          <Lock className="text-amber-400" style={{ width: 14, height: 14 }} />
+          <p className="text-xs text-amber-400 font-semibold">{pdfLock.userName} is using PDF Analysis — view only mode</p>
+        </div>
+      )}
       {!hasDoc && !extracting && (
         <div className="flex flex-col gap-4 p-5 h-full justify-center">
           <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} onClick={() => fileRef.current?.click()}
@@ -468,38 +493,124 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   MEDIA PANEL
+   MEDIA PANEL — WebRTC mesh for multi-user video/screen
 ══════════════════════════════════════════════════════════════════ */
+const ICE_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+
 function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, onRequestPermission }) {
-  const camVideoRef    = useRef(null);
+  const camVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
+  const peersRef = useRef({}); // { socketId: RTCPeerConnection }
+  const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { stream, userName } }
+
+  // ── Create peer connection to a remote socket ──
+  const createPeer = useCallback((targetSocketId, initiator = false) => {
+    if (peersRef.current[targetSocketId]) return peersRef.current[targetSocketId];
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    peersRef.current[targetSocketId] = pc;
+
+    // Add our local tracks
+    [camStream, screenStream].forEach(s => {
+      if (s) s.getTracks().forEach(t => pc.addTrack(t, s));
+    });
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate && socket) {
+        socket.emit("webrtc-ice-candidate", { to: targetSocketId, candidate: e.candidate });
+      }
+    };
+
+    pc.ontrack = (e) => {
+      setRemoteStreams(prev => ({
+        ...prev,
+        [targetSocketId]: { stream: e.streams[0], userName: "Peer" }
+      }));
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+        pc.close();
+        delete peersRef.current[targetSocketId];
+        setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
+      }
+    };
+
+    if (initiator) {
+      pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+        socket.emit("webrtc-offer", {
+          sessionId, to: targetSocketId, offer: pc.localDescription,
+          fromUserId: session?.user?.id, fromUserName: session?.user?.name
+        });
+      }).catch(console.error);
+    }
+    return pc;
+  }, [camStream, screenStream, socket, session, sessionId]);
+
+  // ── Socket event handlers for WebRTC signaling ──
+  useEffect(() => {
+    if (!socket) return;
+
+    const onOffer = async ({ from, offer, fromUserName }) => {
+      const pc = createPeer(from, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("webrtc-answer", { to: from, answer: pc.localDescription });
+      setRemoteStreams(prev => ({ ...prev, [from]: { ...prev[from], userName: fromUserName || "Peer" } }));
+    };
+
+    const onAnswer = async ({ from, answer }) => {
+      const pc = peersRef.current[from];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    };
+
+    const onIce = async ({ from, candidate }) => {
+      const pc = peersRef.current[from];
+      if (pc) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) { console.warn("[ICE]", e); }
+      }
+    };
+
+    socket.on("webrtc-offer", onOffer);
+    socket.on("webrtc-answer", onAnswer);
+    socket.on("webrtc-ice-candidate", onIce);
+
+    return () => {
+      socket.off("webrtc-offer", onOffer);
+      socket.off("webrtc-answer", onAnswer);
+      socket.off("webrtc-ice-candidate", onIce);
+    };
+  }, [socket, createPeer]);
+
+  // ── When our stream changes, renegotiate with all peers ──
+  useEffect(() => {
+    if (!socket) return;
+    // Send offer to all session users when we start streaming
+    const onUsers = (users) => {
+      if (!camStream && !screenStream) return;
+      users.forEach(u => {
+        if (u.socketId !== socket.id) {
+          // Close existing peer and create fresh
+          if (peersRef.current[u.socketId]) { peersRef.current[u.socketId].close(); delete peersRef.current[u.socketId]; }
+          createPeer(u.socketId, true);
+        }
+      });
+    };
+    socket.on("session-users", onUsers);
+    return () => socket.off("session-users", onUsers);
+  }, [camStream, screenStream, socket, createPeer]);
 
   const toggleCam = async () => {
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
       setCamStream(null);
-      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "camera", status: "off" });
-    }
-    else {
-      // Permission check if others are using camera? 
-      // User said "except for camera all can join at once", so Cam is likely free.
+      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "off" });
+    } else {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setCamStream(s);
-        if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "camera", status: "on" });
-      } catch {
-        toast.error("Camera access denied.");
-      }
-    }
-  };
-
-  const startScreenShare = async () => {
-    try {
-      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      setScreenStream(s);
-      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "screen", status: "on" });
-    } catch (err) {
-      console.error(err);
+        if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "on" });
+      } catch { toast.error("Camera access denied."); }
     }
   };
 
@@ -507,88 +618,92 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
       setScreenStream(null);
-      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, type: "screen", status: "off" });
-    }
-    else {
-      const sharerId = activeSharers?.screen;
-      if (sharerId && sharerId !== session?.user?.id) {
-        onRequestPermission("screen");
-      } else {
-        await startScreenShare();
-      }
+      if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
+    } else {
+      try {
+        const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        setScreenStream(s);
+        if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "on" });
+        s.getVideoTracks()[0].onended = () => {
+          setScreenStream(null);
+          if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
+        };
+      } catch (err) { console.error(err); }
     }
   };
-
-  useEffect(() => {
-    const handlePermission = (e) => {
-      if (e.detail.type === "screen") {
-        startScreenShare();
-      }
-    };
-    window.addEventListener("permission-granted", handlePermission);
-    return () => window.removeEventListener("permission-granted", handlePermission);
-  }, [session, socket, sessionId]);
 
   useEffect(() => { if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream; }, [camStream]);
   useEffect(() => { if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream; }, [screenStream]);
 
-  return (
-    <div className="flex flex-col gap-5 p-5 h-full overflow-y-auto">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {[
-          { label: "Camera", stream: camStream, videoRef: camVideoRef, toggle: toggleCam, icon: Camera, type: "camera" },
-          { label: "Screen Share", stream: screenStream, videoRef: screenVideoRef, toggle: toggleScreen, icon: Monitor, type: "screen" }
-        ].map(({ label, stream, videoRef, toggle, icon: Icon, type }) => {
-          const isOthersSharing = activeSharers?.[type] && activeSharers[type] !== session?.user?.id;
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { Object.values(peersRef.current).forEach(pc => pc.close()); peersRef.current = {}; };
+  }, []);
 
-          return (
-            <div key={label} className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117] group">
-              {stream ? (
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-700 gap-2">
-                  <Icon style={{ width: 32, height: 32 }} />
-                  <p className="text-xs font-semibold">{label} Offline</p>
-                  {isOthersSharing && (
-                    <span className="text-[10px] text-sky-500 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
-                      Someone is presenting
-                    </span>
-                  )}
-                </div>
-              )}
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between p-3 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-[10px] text-white font-bold">{label}</span>
-                <button
-                  onClick={toggle}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                    stream 
-                      ? "bg-rose-500 hover:bg-rose-400" 
-                      : isOthersSharing 
-                        ? "bg-amber-500 hover:bg-amber-400" 
-                        : "bg-sky-600 hover:bg-sky-500"
-                  } text-white`}
-                >
-                  {stream 
-                    ? "Turn Off" 
-                    : isOthersSharing 
-                      ? "Request to Present" 
-                      : "Turn On"
-                  }
-                </button>
-              </div>
-            </div>
-          );
-        })}
+  const remoteEntries = Object.entries(remoteStreams);
+  const hasLocalVideo = camStream || screenStream;
+  const totalVideos = (camStream ? 1 : 0) + (screenStream ? 1 : 0) + remoteEntries.length;
+  const gridCols = totalVideos <= 1 ? "grid-cols-1" : totalVideos <= 4 ? "grid-cols-2" : "grid-cols-3";
+
+  return (
+    <div className="flex flex-col gap-4 p-3 md:p-5 h-full overflow-y-auto">
+      {/* Controls */}
+      <div className="flex gap-3 justify-center flex-wrap">
+        <button onClick={toggleCam}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${camStream ? "bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30" : "bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/20"}`}>
+          <Camera style={{ width: 16, height: 16 }} />{camStream ? "Stop Camera" : "Start Camera"}
+        </button>
+        <button onClick={toggleScreen}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${screenStream ? "bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30" : "bg-white/[0.05] border border-white/[0.08] text-gray-300 hover:bg-white/[0.08]"}`}>
+          <Monitor style={{ width: 16, height: 16 }} />{screenStream ? "Stop Sharing" : "Share Screen"}
+        </button>
       </div>
-      <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-5 text-center">
-        <h3 className="text-sm font-bold text-sky-400 mb-1">Classroom Collaboration</h3>
+
+      {/* Video grid — Google Meet style */}
+      <div className={`grid ${gridCols} gap-3 flex-1`}>
+        {camStream && (
+          <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
+            <video ref={camVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">You (Camera)</div>
+          </div>
+        )}
+        {screenStream && (
+          <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
+            <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">You (Screen)</div>
+          </div>
+        )}
+        {remoteEntries.map(([sid, { stream, userName }]) => (
+          <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
+            <video autoPlay playsInline className="w-full h-full object-cover" ref={el => { if (el && stream) el.srcObject = stream; }} />
+            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold">{userName}</div>
+          </div>
+        ))}
+      </div>
+
+      {totalVideos === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center">
+            <Video className="text-gray-600" style={{ width: 28, height: 28 }} />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-gray-400 mb-1">No active streams</h3>
+            <p className="text-xs text-gray-600 max-w-sm">Start your camera or share your screen. All members can see each other — like Google Meet!</p>
+          </div>
+        </div>
+      )}
+
+      {/* Online members indicator */}
+      <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-3 md:p-5 text-center">
+        <h3 className="text-sm font-bold text-sky-400 mb-1">Live Classroom</h3>
         <p className="text-xs text-gray-500 max-w-md mx-auto">
-          Share your camera or screen with the group. If someone is already presenting, you'll need to send a permission request to the active presenter.
+          Camera and screen share are visible to all members in real-time via WebRTC.
         </p>
       </div>
     </div>
   );
 }
+
 
 /* ══════════════════════════════════════════════════════════════════
    MUSIC PANEL
@@ -655,13 +770,16 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef(null);
+  const seenIds = useRef(new Set());
 
   const fetchMessages = useCallback(async () => {
     try {
       const res = await fetch(`/api/groups/${groupId}/chat`);
       if (res.ok) {
         const d = await res.json();
-        setMessages(d.messages || []);
+        const msgs = d.messages || [];
+        msgs.forEach(m => seenIds.current.add(m._id));
+        setMessages(msgs);
       }
     } catch {}
   }, [groupId]);
@@ -669,10 +787,18 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   useEffect(() => {
     fetchMessages();
     if (!socket) return;
-    const onNewMsg = (msg) => setMessages(prev => [...prev, msg]);
-    socket.on("new-message", onNewMsg);
-    return () => socket.off("new-message", onNewMsg);
-  }, [fetchMessages, socket]);
+    // Join the group room so we receive group-chat events
+    socket.emit("join-group", groupId);
+    const onGroupChat = (msg) => {
+      // Deduplicate — don't add if we already have this message (optimistic add)
+      if (seenIds.current.has(msg._id)) return;
+      seenIds.current.add(msg._id);
+      setMessages(prev => [...prev, msg]);
+    };
+    socket.on("group-chat", onGroupChat);
+    socket.on("new-message", onGroupChat);
+    return () => { socket.off("group-chat", onGroupChat); socket.off("new-message", onGroupChat); };
+  }, [fetchMessages, socket, groupId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -681,6 +807,16 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   const send = async () => {
     if (!input.trim() || sending) return;
     const text = input.trim();
+    // Optimistic add — show message immediately (WhatsApp-style)
+    const optimisticMsg = {
+      _id: "opt_" + Date.now(),
+      sender: { _id: session?.user?.id, name: session?.user?.name || "You" },
+      text,
+      createdAt: new Date().toISOString()
+    };
+    seenIds.current.add(optimisticMsg._id);
+    setMessages(prev => [...prev, optimisticMsg]);
+    setInput("");
     setSending(true);
     try {
       const res = await fetch(`/api/groups/${groupId}/chat`, {
@@ -691,10 +827,9 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
       if (res.ok) {
         const data = await res.json();
         const msg = data.message;
-        // In this implementation, the POST returns the new message object
-        if (socket) socket.emit("send-message", { sessionId, message: msg });
-        setMessages(prev => [...prev, msg]);
-        setInput("");
+        seenIds.current.add(msg._id);
+        // Replace optimistic message with real one
+        setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? msg : m));
       }
     } catch {}
     finally { setSending(false); }
@@ -713,7 +848,7 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
         {messages.map((m, i) => {
           const isMe = String(m.sender?._id || m.sender) === String(me);
           return (
-            <div key={i} className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
+            <div key={m._id || i} className={`flex gap-2 ${isMe ? "flex-row-reverse" : ""}`}>
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500/40 to-indigo-600/40 border border-white/[0.08] flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
                 {(m.sender?.name || "?")[0].toUpperCase()}
               </div>
@@ -959,12 +1094,16 @@ const TUTOR_TABS = [
   { id: "resources", label: "Resources", icon: Link2      },
 ];
 
-function QuizPanel({ socket, sessionId, syncedModule }) {
+function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
   const [topic,     setTopic]     = useState("");
   const [loading,   setLoading]   = useState(false);
   const [module,    setModule]    = useState(null);
   const [activeTab, setActiveTab] = useState("intro");
   const [error,     setError]     = useState("");
+
+  const aiLock = featureLocks?.ai;
+  const isLockedByOther = aiLock && aiLock.userId !== session?.user?.id;
+  const isLockedByMe = aiLock && aiLock.userId === session?.user?.id;
 
   useEffect(() => {
     if (syncedModule) {
@@ -976,6 +1115,14 @@ function QuizPanel({ socket, sessionId, syncedModule }) {
   const generate = async () => {
     const t = topic.trim();
     if (!t) return;
+    // Acquire lock
+    if (isLockedByOther) {
+      toast.error(`\ud83d\udd12 AI Tutor is being used by ${aiLock.userName}`);
+      return;
+    }
+    if (socket && !isLockedByMe) {
+      socket.emit("feature-lock", { sessionId, feature: "ai", userId: session?.user?.id, userName: session?.user?.name });
+    }
     setLoading(true); setError(""); setModule(null);
     try {
       const res  = await fetch("/api/chat", {
@@ -989,7 +1136,6 @@ function QuizPanel({ socket, sessionId, syncedModule }) {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("Bad format");
       const parsed = JSON.parse(jsonMatch[0]);
-      // merge AI resource suggestions with auto-generated real links
       parsed._realLinks = buildResourceLinks(t);
       parsed.topic = t;
       setModule(parsed);
@@ -998,15 +1144,24 @@ function QuizPanel({ socket, sessionId, syncedModule }) {
       if (socket) {
         socket.emit("ai-tutor-sync", { sessionId, module: parsed });
       }
+      // Release lock after output is produced
+      if (socket) socket.emit("feature-unlock", { sessionId, feature: "ai", userId: session?.user?.id });
     } catch (err) {
       console.error("[TutorAI]", err);
       setError("Couldn't generate module. Try a more specific topic or retry.");
+      if (socket) socket.emit("feature-unlock", { sessionId, feature: "ai", userId: session?.user?.id });
     } finally { setLoading(false); }
   };
 
   /* ── Search screen ── */
   if (!module && !loading) return (
     <div className="flex flex-col items-center justify-center gap-8 h-full p-8">
+      {isLockedByOther && (
+        <div className="w-full max-w-lg px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-2">
+          <Lock className="text-amber-400" style={{ width: 14, height: 14 }} />
+          <p className="text-xs text-amber-400 font-semibold">{aiLock.userName} is using AI Tutor — please wait</p>
+        </div>
+      )}
       <div className="text-center space-y-3 max-w-md">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500/20 to-indigo-600/20 border border-sky-500/20 flex items-center justify-center mx-auto">
           <Brain className="text-sky-400" style={{ width: 32, height: 32 }} />
@@ -1231,13 +1386,13 @@ export default function StudyRoomPage() {
   const [camStream,    setCamStream]    = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [socket,       setSocket]       = useState(null);
-  const [activeSharers, setActiveSharers] = useState({}); // { type: userID, name: userName }
+  const [activeSharers, setActiveSharers] = useState({});
   const [sessionUsers, setSessionUsers] = useState([]);
   const [permissionRequest, setPermissionRequest] = useState(null);
   const [remoteModule, setRemoteModule] = useState(null);
   const [remotePdf, setRemotePdf] = useState({ fileName: "", docText: "" });
-  const [peers, setPeers] = useState({}); // { socketId: RTCPeerConnection }
-  const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { type: Stream } }
+  const [featureLocks, setFeatureLocks] = useState({ ai: null, pdf: null });
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
@@ -1246,8 +1401,8 @@ export default function StudyRoomPage() {
       transports: ["websocket", "polling"],
     });
     setSocket(s);
-    if (sessionId) {
-      s.emit("join-session", sessionId);
+    if (sessionId && session?.user) {
+      s.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
     }
     s.on("permission-request", ({ from, type }) => {
       setPermissionRequest({ from, type });
@@ -1258,7 +1413,6 @@ export default function StudyRoomPage() {
       if (to === session?.user?.id) {
         if (allowed) {
           toast.success(`✅ Permission granted for ${type}!`);
-          // Trigger the feature — for now just simple toast, the component should handle state
           window.dispatchEvent(new CustomEvent("permission-granted", { detail: { type } }));
         } else {
           toast.error(`❌ Permission denied for ${type}.`);
@@ -1273,16 +1427,34 @@ export default function StudyRoomPage() {
 
     s.on("pdf-sync", (data) => {
       setRemotePdf(data);
-      toast.info(`📄 PDF "${data.fileName}" synced!`);
+      toast.info(`📄 PDF \"${data.fileName}\" synced!`);
     });
 
-    s.on("media-status", ({ userId, name, type, status }) => {
+    s.on("media-status", ({ userId, userName, type, status }) => {
       setActiveSharers(prev => {
         const next = { ...prev };
-        if (status === "on") next[type] = { userId, name };
+        if (status === "on") next[type] = { userId, name: userName };
         else if (next[type]?.userId === userId) delete next[type];
         return next;
       });
+    });
+
+    // Feature lock state (AI/PDF mutual exclusion)
+    s.on("feature-lock-state", (locks) => {
+      setFeatureLocks(locks);
+    });
+    s.on("feature-lock-denied", ({ feature, lockedBy }) => {
+      toast.error(`🔒 ${feature.toUpperCase()} is being used by ${lockedBy.userName}`);
+    });
+
+    // Pomodoro start — redirect ALL members to pomodoro tab
+    s.on("pomodoro-start", (state) => {
+      setActiveTool("pomodoro");
+      toast.info("⏱️ Pomodoro session started! Redirecting...", { autoClose: 3000 });
+    });
+
+    s.on("session-users", (users) => {
+      setSessionUsers(users);
     });
 
     return () => {
@@ -1336,57 +1508,81 @@ export default function StudyRoomPage() {
 
   const ActiveIcon = TOOLS.find(t => t.id === activeTool)?.icon;
 
+  const lockIndicator = (featureKey) => {
+    const lock = featureLocks[featureKey];
+    if (!lock) return null;
+    const isMe = lock.userId === session?.user?.id;
+    return (
+      <span className={`absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[7px] ring-2 ring-[#0b0f1a] ${isMe ? 'bg-emerald-500' : 'bg-amber-500'}`} title={isMe ? 'You are using this' : `${lock.userName} is using this`}>
+        <Lock style={{ width: 8, height: 8 }} />
+      </span>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-[#060810] text-gray-100 overflow-hidden">
-      <aside className="w-[68px] bg-[#0b0f1a] border-r border-white/[0.06] flex flex-col items-center py-4 gap-1.5 flex-shrink-0">
+      {/* ── Mobile hamburger ── */}
+      <button onClick={() => setMobileMenuOpen(o => !o)} className="md:hidden fixed top-3 left-3 z-[60] w-10 h-10 rounded-xl bg-[#0b0f1a] border border-white/[0.08] flex items-center justify-center text-gray-400 hover:text-white transition-colors shadow-lg">
+        <Menu style={{ width: 18, height: 18 }} />
+      </button>
+
+      {/* ── Sidebar (hidden on mobile unless menu open) ── */}
+      <aside className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 fixed md:relative z-50 w-[68px] bg-[#0b0f1a] border-r border-white/[0.06] flex flex-col items-center py-4 gap-1.5 flex-shrink-0 h-full`}>
         <button onClick={() => router.push("/Home")} className="w-10 h-10 rounded-xl overflow-hidden mb-2 flex-shrink-0 hover:scale-105 transition-transform">
           <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
         </button>
         <div className="w-8 h-px bg-white/[0.06] mb-1" />
         {TOOLS.map(({ id, icon: Icon, label }) => {
           const isActive = activeSharers[id] || (id === "pdf" && remotePdf.docText) || (id === "quiz" && remoteModule);
+          const featureKey = id === "quiz" ? "ai" : id === "pdf" ? "pdf" : null;
           return (
-            <button key={id} onClick={() => setActiveTool(id)} title={label}
+            <button key={id} onClick={() => { setActiveTool(id); setMobileMenuOpen(false); }} title={label}
               className={`relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${
                 activeTool === id ? "bg-gradient-to-br from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20" : "text-gray-600 hover:bg-white/[0.06] hover:text-gray-300"
               }`}>
               <Icon style={{ width: 18, height: 18 }} />
               <span className="text-[8px] font-semibold tracking-wide">{label}</span>
-              {isActive && (
+              {isActive && !featureKey && (
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#0b0f1a] animate-pulse" />
               )}
+              {featureKey && lockIndicator(featureKey)}
             </button>
           );
         })}
         <div className="flex-1" />
+        {/* Online users count */}
+        <div className="text-[9px] text-gray-600 font-bold mb-1">{sessionUsers.length} online</div>
         <button onClick={() => router.push(`/groups/${groupId}`)} title="Leave Room"
           className="w-12 h-12 rounded-xl flex items-center justify-center text-gray-600 hover:bg-rose-500/10 hover:text-rose-400 transition-all">
           <X style={{ width: 18, height: 18 }} />
         </button>
       </aside>
+      {/* Mobile overlay */}
+      {mobileMenuOpen && <div onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 bg-black/50 z-40 md:hidden" />}
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 bg-[#0b0f1a] border-b border-white/[0.06] px-5 flex items-center gap-4 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="text-sm font-bold text-gray-200">{group?.name || "Study Room"}</span>
-            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Live</span>
+        <header className="h-12 bg-[#0b0f1a] border-b border-white/[0.06] px-3 md:px-5 flex items-center gap-2 md:gap-4 flex-shrink-0">
+          <div className="w-10 md:hidden" /> {/* spacer for hamburger */}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse flex-shrink-0" />
+            <span className="text-sm font-bold text-gray-200 truncate">{group?.name || "Study Room"}</span>
+            <span className="hidden sm:inline text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex-shrink-0">Live</span>
           </div>
-          <div className="flex gap-2 ml-3">
+          <div className="hidden sm:flex gap-2 ml-3">
             {camStream && <span className="text-[10px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded-lg border border-sky-500/20 flex items-center gap-1"><Camera style={{width:10,height:10}}/>Cam On</span>}
             {screenStream && <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-lg border border-indigo-500/20 flex items-center gap-1"><Monitor style={{width:10,height:10}}/>Sharing</span>}
           </div>
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-2 md:gap-4">
             <span className="text-xs font-mono text-gray-600">{elapsed}</span>
-            {ActiveIcon && <span className="flex items-center gap-1.5 text-xs text-gray-600"><ActiveIcon style={{width:12,height:12}}/>{TOOLS.find(t=>t.id===activeTool)?.label}</span>}
+            {ActiveIcon && <span className="hidden sm:flex items-center gap-1.5 text-xs text-gray-600"><ActiveIcon style={{width:12,height:12}}/>{TOOLS.find(t=>t.id===activeTool)?.label}</span>}
           </div>
         </header>
 
         <div className="flex-1 overflow-hidden">
           {activeTool==="whiteboard" && <WhiteboardPanel socket={socket} sessionId={sessionId} />}
           {activeTool==="chat"       && <div className="h-full"><ChatPanel socket={socket} sessionId={sessionId} groupId={groupId} session={session}/></div>}
-          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} /></div>}
-          {activeTool==="quiz"       && <div className="h-full"><QuizPanel socket={socket} sessionId={sessionId} syncedModule={remoteModule} /></div>}
+          {activeTool==="pdf"        && <div className="h-full overflow-y-auto"><PDFPanel socket={socket} sessionId={sessionId} syncedData={remotePdf} featureLocks={featureLocks} session={session} /></div>}
+          {activeTool==="quiz"       && <div className="h-full"><QuizPanel socket={socket} sessionId={sessionId} syncedModule={remoteModule} featureLocks={featureLocks} session={session} /></div>}
           {activeTool==="media"      && <div className="h-full overflow-y-auto"><MediaPanel socket={socket} sessionId={sessionId} camStream={camStream} setCamStream={setCamStream} screenStream={screenStream} setScreenStream={setScreenStream} session={session} activeSharers={activeSharers} onRequestPermission={handleRequestPermission} /></div>}
           {activeTool==="pomodoro"   && <div className="h-full overflow-y-auto"><PomodoroPanel socket={socket} sessionId={sessionId} /></div>}
           {activeTool==="music"      && <div className="h-full overflow-y-auto"><MusicPanel /></div>}

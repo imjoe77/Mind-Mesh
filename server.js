@@ -17,6 +17,19 @@ const handle = app.getRequestHandler();
 // Global io instance — accessible from API routes via globalThis.__io
 let io;
 
+// ── Per-session lock state for AI / PDF features ──
+// { [sessionId]: { ai: { userId, userName } | null, pdf: { userId, userName } | null } }
+const sessionLocks = {};
+
+function getSessionLocks(sessionId) {
+  if (!sessionLocks[sessionId]) sessionLocks[sessionId] = { ai: null, pdf: null };
+  return sessionLocks[sessionId];
+}
+
+// ── Track which user is behind each socket ──
+// { [socketId]: { userId, userName, sessionId } }
+const socketUserMap = {};
+
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url, true);
@@ -41,6 +54,7 @@ app.prepare().then(() => {
     socket.on("join-user", (userId) => {
       if (userId) {
         socket.join(`user:${userId}`);
+        socket._userId = userId;
         console.log(`[SOCKET] User ${userId} joined their notification room`);
       }
     });
@@ -53,16 +67,40 @@ app.prepare().then(() => {
     });
 
     // ── Classroom / Room Signaling ──
-    socket.on("join-session", (sessionId) => {
+    socket.on("join-session", ({ sessionId, userId, userName }) => {
       if (sessionId) {
         socket.join(`session:${sessionId}`);
-        console.log(`[SOCKET] User ${socket.id} joined session:${sessionId}`);
+        // Also join user-specific room for WebRTC signaling
+        if (userId) {
+          socket.join(`user:${userId}`);
+          socket._userId = userId;
+          socket._userName = userName;
+          socket._sessionId = sessionId;
+          socketUserMap[socket.id] = { userId, userName, sessionId };
+        }
+        console.log(`[SOCKET] User ${userName || socket.id} joined session:${sessionId}`);
         
-        // Broadcast user list to the room
+        // Broadcast user list to the room (with user info)
         const clients = io.sockets.adapter.rooms.get(`session:${sessionId}`);
-        const userList = clients ? Array.from(clients) : [];
+        const userList = [];
+        if (clients) {
+          clients.forEach(sid => {
+            const info = socketUserMap[sid];
+            userList.push({ socketId: sid, userId: info?.userId, userName: info?.userName });
+          });
+        }
         io.to(`session:${sessionId}`).emit("session-users", userList);
+        
+        // Send current lock state to the newly joined user
+        const locks = getSessionLocks(sessionId);
+        socket.emit("feature-lock-state", locks);
       }
+    });
+
+    // ── Group Chat — forward to all in group room ──
+    socket.on("group-chat", ({ groupId, message }) => {
+      // Broadcast to all OTHER sockets in the group
+      socket.to(`group:${groupId}`).emit("group-chat", message);
     });
 
     // ── Generic Forwarding ──
@@ -79,15 +117,43 @@ app.prepare().then(() => {
       socket.to(`session:${sessionId}`).emit("canvas-clear");
     });
 
-    // Pomodoro Sync
+    // ── Pomodoro Sync ──
     socket.on("pomodoro-sync", ({ sessionId, state }) => {
       socket.to(`session:${sessionId}`).emit("pomodoro-sync", state);
     });
 
+    // ── Pomodoro START — broadcasts to ALL (including sender) so everyone gets redirected ──
+    socket.on("pomodoro-start", ({ sessionId, state }) => {
+      console.log(`[POMODORO] Session started in ${sessionId}`);
+      io.to(`session:${sessionId}`).emit("pomodoro-start", state);
+    });
+
+    // ── AI / PDF Feature Locking ──
+    socket.on("feature-lock", ({ sessionId, feature, userId, userName }) => {
+      const locks = getSessionLocks(sessionId);
+      if (!locks[feature]) {
+        locks[feature] = { userId, userName };
+        io.to(`session:${sessionId}`).emit("feature-lock-state", locks);
+        console.log(`[LOCK] ${userName} locked ${feature} in session ${sessionId}`);
+      } else {
+        // Already locked — inform the requester
+        socket.emit("feature-lock-denied", { feature, lockedBy: locks[feature] });
+      }
+    });
+
+    socket.on("feature-unlock", ({ sessionId, feature, userId }) => {
+      const locks = getSessionLocks(sessionId);
+      if (locks[feature]?.userId === userId) {
+        locks[feature] = null;
+        io.to(`session:${sessionId}`).emit("feature-lock-state", locks);
+        console.log(`[LOCK] ${feature} unlocked in session ${sessionId}`);
+      }
+    });
+
     // Media / Screen Sharing signaling
-    socket.on("media-status", ({ sessionId, userId, type, status }) => {
-      // broadcast who is sharing what
-      socket.to(`session:${sessionId}`).emit("media-status", { userId, type, status });
+    socket.on("media-status", ({ sessionId, userId, userName, type, status }) => {
+      // broadcast who is sharing what (include userName for display)
+      socket.to(`session:${sessionId}`).emit("media-status", { userId, userName, type, status });
     });
 
     socket.on("permission-request", ({ sessionId, from, type }) => {
@@ -111,24 +177,53 @@ app.prepare().then(() => {
       socket.to(`session:${sessionId}`).emit("pdf-sync", { fileName, docText });
     });
 
-    // WebRTC Signaling
+    // ── WebRTC Signaling (mesh) ──
+    socket.on("webrtc-offer", ({ sessionId, to, offer, fromUserId, fromUserName }) => {
+      io.to(to).emit("webrtc-offer", { from: socket.id, offer, fromUserId, fromUserName });
+    });
+
+    socket.on("webrtc-answer", ({ to, answer }) => {
+      io.to(to).emit("webrtc-answer", { from: socket.id, answer });
+    });
+
+    socket.on("webrtc-ice-candidate", ({ to, candidate }) => {
+      io.to(to).emit("webrtc-ice-candidate", { from: socket.id, candidate });
+    });
+
+    // Legacy signal (keep for compat)
     socket.on("webrtc-signal", ({ sessionId, to, signal }) => {
       if (to) {
-        io.to(`user:${to}`).emit("webrtc-signal", { from: socket.id, signal });
+        io.to(to).emit("webrtc-signal", { from: socket.id, signal });
       } else {
         socket.to(`session:${sessionId}`).emit("webrtc-signal", { from: socket.id, signal });
       }
     });
 
     socket.on("disconnecting", () => {
+      const info = socketUserMap[socket.id];
       socket.rooms.forEach(room => {
         if (room.startsWith("session:")) {
+          const sId = room.replace("session:", "");
+          // Release any locks held by this user
+          const locks = getSessionLocks(sId);
+          if (locks.ai?.userId === info?.userId) { locks.ai = null; io.to(room).emit("feature-lock-state", locks); }
+          if (locks.pdf?.userId === info?.userId) { locks.pdf = null; io.to(room).emit("feature-lock-state", locks); }
+
           // get the room and subtract this user
           const clients = io.sockets.adapter.rooms.get(room);
-          const userList = clients ? Array.from(clients).filter(id => id !== socket.id) : [];
+          const userList = [];
+          if (clients) {
+            clients.forEach(sid => {
+              if (sid !== socket.id) {
+                const u = socketUserMap[sid];
+                userList.push({ socketId: sid, userId: u?.userId, userName: u?.userName });
+              }
+            });
+          }
           io.to(room).emit("session-users", userList);
         }
       });
+      delete socketUserMap[socket.id];
     });
 
     socket.on("disconnect", () => {
