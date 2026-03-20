@@ -24,7 +24,8 @@ export default function SocketProvider({ children }) {
       return;
     }
 
-    const socket = window.io({
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+    const socket = window.io(backendUrl, {
       path: "/api/socketio",
       transports: ["websocket", "polling"],
     });

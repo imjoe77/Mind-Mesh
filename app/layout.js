@@ -27,7 +27,7 @@ export default function RootLayout({ children }) {
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body>
-        <Script src="/api/socketio/socket.io.js" strategy="beforeInteractive" />
+        <Script src={`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/socketio/socket.io.js`} strategy="beforeInteractive" />
         <Providers>
           <SocketProvider>
             {children}

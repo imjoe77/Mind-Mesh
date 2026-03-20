@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/socketio/:path*",
+      "destination": "https://mind-mesh-refactored.onrender.com/api/socketio/:path*"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://mind-mesh-refactored.onrender.com/api/:path*"
+    }
+  ]
+}
