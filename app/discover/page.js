@@ -57,8 +57,13 @@ function ChatPanel({ connection, myId, onClose }) {
 
   useEffect(() => {
     fetchMessages();
-    pollRef.current = setInterval(fetchMessages, 4000);
-    const handleNewMessage = (e) => { if (e.detail.from === connection._id) fetchMessages(); };
+    pollRef.current = setInterval(fetchMessages, 3000);
+    const handleNewMessage = (e) => {
+      const detail = e.detail;
+      if (detail.from === connection._id || detail.from?.toString() === connection._id) {
+        fetchMessages();
+      }
+    };
     window.addEventListener("new-message", handleNewMessage);
     return () => { clearInterval(pollRef.current); window.removeEventListener("new-message", handleNewMessage); };
   }, [fetchMessages, connection._id]);
@@ -68,14 +73,32 @@ function ChatPanel({ connection, myId, onClose }) {
   const handleSend = async () => {
     const text = input.trim();
     if (!text || sending) return;
+    // Optimistic add — show message instantly
+    const optimisticMsg = {
+      _id: "opt_" + Date.now(),
+      from: myId,
+      content: text,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
     setSending(true); setInput("");
     try {
       const res = await fetch(`/api/messages/${connection._id}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text }),
       });
-      if (res.ok) await fetchMessages();
-    } catch (err) { console.error(err); }
+      if (res.ok) {
+        const data = await res.json();
+        // Replace optimistic message with real one
+        setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? data.message : m));
+      } else {
+        // Remove optimistic message on failure
+        setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
+      }
+    } catch (err) {
+      console.error(err);
+      setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
+    }
     finally { setSending(false); }
   };
 
@@ -650,9 +673,9 @@ export default function DiscoverPage() {
             {/* Card Stack */}
             <div className="flex flex-col items-center gap-6 w-full lg:w-auto">
               {loading ? (
-                <div className="w-[340px] h-[560px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                <div className="w-full max-w-[340px] h-[560px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
               ) : !currentUser ? (
-                <div className="w-[340px] h-[560px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
+                <div className="w-full max-w-[340px] h-[560px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
                   <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
                     <Zap className="text-gray-600" style={{ width: 28, height: 28 }} />
                   </div>
@@ -669,7 +692,7 @@ export default function DiscoverPage() {
               ) : (
                 <>
                   {/* card stack */}
-                  <div className="relative w-[340px] h-[560px]">
+                  <div className="relative w-full max-w-[340px] h-[560px]">
                     {[...visibleStack].reverse().map((user, revIdx) => {
                       const idx = visibleStack.length - 1 - revIdx;
                       return (

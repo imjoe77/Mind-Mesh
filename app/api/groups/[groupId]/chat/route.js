@@ -40,6 +40,8 @@ export async function POST(req, { params }) {
   // Emit via Socket.IO if available
   if (globalThis.__io) {
     globalThis.__io.to(`group:${groupId}`).emit("group-chat", msg);
+    // Also emit as new-message for session-based chat panels
+    globalThis.__io.to(`group:${groupId}`).emit("new-message", msg);
   }
 
   // Keep last 100 messages

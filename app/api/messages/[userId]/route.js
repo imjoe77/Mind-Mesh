@@ -82,8 +82,11 @@ export async function POST(req, { params }) {
     // Real-time emission via Socket.IO
     if (globalThis.__io) {
       globalThis.__io.to(`user:${userId}`).emit("new-message", {
+        _id: message._id,
         from: session.user.id,
-        content: message.content
+        to: userId,
+        content: message.content,
+        createdAt: message.createdAt
       });
     }
 
