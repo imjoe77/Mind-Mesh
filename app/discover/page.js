@@ -287,21 +287,11 @@ export default function DiscoverPage() {
     } catch (err) { console.error(err); }
   }, []);
 
-  const fetchUnread = useCallback(async () => {
-    try {
-      const res = await fetch("/api/messages/unread");
-      const data = await res.json();
-      if (res.ok) setUnreadMap(data.unread || {});
-    } catch (err) { console.error(err); }
-  }, []);
-
   useEffect(() => {
     if (session) {
-      fetchDiscover(); fetchConnections(); fetchUnread();
-      const t = setInterval(fetchUnread, 8000);
-      return () => clearInterval(t);
+      fetchDiscover(); fetchConnections();
     }
-  }, [session, fetchDiscover, fetchConnections, fetchUnread]);
+  }, [session, fetchDiscover, fetchConnections]);
 
   useEffect(() => {
     if (session && showSetup) {
@@ -453,7 +443,7 @@ export default function DiscoverPage() {
   }
 
   const currentUser = users[currentIndex];
-  const totalUnread = Object.values(unreadMap).reduce((s, c) => s + c, 0);
+  // DMs removed, no more unread message counts
   const visibleStack = users.slice(currentIndex, currentIndex + 3);
 
   const TABS = [
@@ -715,7 +705,6 @@ export default function DiscoverPage() {
                 </div>
               ) : (
                 connections.map(conn => {
-                  const unreadCount = unreadMap[conn._id?.toString()] || 0;
                   const isActive = openChat?._id === conn._id;
                   return (
                     <motion.div key={conn._id}
@@ -728,9 +717,6 @@ export default function DiscoverPage() {
                       <div className="flex items-center gap-4">
                         <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
                           {conn.profilePicture ? <img src={conn.profilePicture} alt="" className="w-full h-full object-cover" /> : conn.name?.charAt(0)}
-                          {unreadCount > 0 && (
-                            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-[9px] font-black flex items-center justify-center">{unreadCount}</span>
-                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-bold text-white text-sm">{conn.name}</p>
