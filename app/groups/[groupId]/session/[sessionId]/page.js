@@ -1233,6 +1233,7 @@ export default function StudyRoomPage() {
   const [socket,       setSocket]       = useState(null);
   const [activeSharers, setActiveSharers] = useState({}); // { type: userID, name: userName }
   const [sessionUsers, setSessionUsers] = useState([]);
+  const [permissionRequest, setPermissionRequest] = useState(null);
   const [remoteModule, setRemoteModule] = useState(null);
   const [remotePdf, setRemotePdf] = useState({ fileName: "", docText: "" });
   const [peers, setPeers] = useState({}); // { socketId: RTCPeerConnection }
