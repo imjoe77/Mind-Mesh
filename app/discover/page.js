@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "framer-motion";
 import { X, Heart, MessageCircle, Users, Settings, Inbox, Zap } from "lucide-react";
+import { useSocket } from "@/app/Components/SocketProvider";
 
 // ─── Avatar helper ─────────────────────────────────────────────────────────
 function Avatar({ user, className = "", size = 40 }) {
@@ -38,7 +39,7 @@ function Avatar({ user, className = "", size = 40 }) {
 }
 
 // ─── Chat Panel ────────────────────────────────────────────────────────────
-function ChatPanel({ connection, myId, onClose }) {
+function ChatPanel({ connection, myId, onClose, socket }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
@@ -58,6 +59,7 @@ function ChatPanel({ connection, myId, onClose }) {
   useEffect(() => {
     fetchMessages();
     pollRef.current = setInterval(fetchMessages, 3000);
+    // Listen for incoming DMs via socket
     const handleNewMessage = (e) => {
       const detail = e.detail;
       if (detail.from === connection._id || detail.from?.toString() === connection._id) {
@@ -65,8 +67,23 @@ function ChatPanel({ connection, myId, onClose }) {
       }
     };
     window.addEventListener("new-message", handleNewMessage);
-    return () => { clearInterval(pollRef.current); window.removeEventListener("new-message", handleNewMessage); };
-  }, [fetchMessages, connection._id]);
+    // Also listen directly on socket for dm-message
+    const handleDm = (msg) => {
+      if (msg.from === connection._id || msg.from?.toString() === connection._id) {
+        setMessages(prev => {
+          // Avoid duplicates
+          if (prev.some(m => m._id === msg._id)) return prev;
+          return [...prev, msg];
+        });
+      }
+    };
+    if (socket) socket.on("dm-message", handleDm);
+    return () => {
+      clearInterval(pollRef.current);
+      window.removeEventListener("new-message", handleNewMessage);
+      if (socket) socket.off("dm-message", handleDm);
+    };
+  }, [fetchMessages, connection._id, socket]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
@@ -91,9 +108,18 @@ function ChatPanel({ connection, myId, onClose }) {
         const data = await res.json();
         // Replace optimistic message with real one
         setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? data.message : m));
+        // Emit via socket so the OTHER user gets it in real-time
+        if (socket) {
+          socket.emit("dm-message", {
+            to: connection._id,
+            message: data.message
+          });
+        }
       } else {
         // Remove optimistic message on failure
         setMessages(prev => prev.filter(m => m._id !== optimisticMsg._id));
+        const errData = await res.json().catch(() => ({}));
+        console.error("Message send failed:", res.status, errData);
       }
     } catch (err) {
       console.error(err);
@@ -379,6 +405,7 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
 export default function DiscoverPage() {
   const { data: session } = useSession();
   const router = useRouter();
+  const { socket: globalSocket } = useSocket();
 
   const [users, setUsers] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -914,7 +941,7 @@ export default function DiscoverPage() {
                 transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 className="sticky top-24 space-y-3"
               >
-                <ChatPanel connection={openChat} myId={session?.user?.id} onClose={() => setOpenChat(null)} />
+                <ChatPanel connection={openChat} myId={session?.user?.id} onClose={() => setOpenChat(null)} socket={globalSocket} />
                 <div className="p-4 rounded-2xl border border-white/[0.07] bg-indigo-500/[0.04] text-center">
                   <p className="text-xs text-gray-500 mb-3">Want to study together?</p>
                   <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
