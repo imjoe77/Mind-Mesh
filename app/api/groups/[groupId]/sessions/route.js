@@ -22,6 +22,46 @@ export async function GET(req, { params }) {
   }
 }
 
+// POST /api/groups/[groupId]/sessions — owner only
+export async function POST(req, { params }) {
+  try {
+    const { groupId } = await params;
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const { date, startTime, endTime, note } = await req.json();
+    if (!date || !startTime || !endTime) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    await connectDB();
+
+    const group = await Group.findById(groupId);
+    if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
+
+    if (group.owner.toString() !== session.user.id) {
+      return NextResponse.json({ error: "Only the owner can add sessions" }, { status: 403 });
+    }
+
+    const newSession = {
+      date: new Date(date),
+      startTime,
+      endTime,
+      note: note || "",
+      status: "scheduled",
+      participants: []
+    };
+
+    group.sessions.push(newSession);
+    await group.save();
+
+    return NextResponse.json({ message: "Session added", session: group.sessions[group.sessions.length - 1] }, { status: 201 });
+  } catch (err) {
+    console.error("[POST_SESSION]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 // DELETE /api/groups/[groupId]/sessions?sessionId=xxx — owner only
 export async function DELETE(req, { params }) {
   try {

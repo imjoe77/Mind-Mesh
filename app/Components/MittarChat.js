@@ -103,13 +103,33 @@ export default function MittarChat() {
     }
   };
 
+  const [windowSize, setWindowSize] = useState({ width: 1200, height: 800 }); // Default fallback
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+      const handleResize = () => {
+        setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+      };
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+  }, []);
+
   return (
     <>
       <motion.button
+        drag
+        dragConstraints={{ 
+          left: -windowSize.width + 80, 
+          right: 0, 
+          top: -windowSize.height + 80, 
+          bottom: 0 
+        }}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
         onClick={toggleChat}
-        className="fixed bottom-6 right-6 z-[9999] w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 via-sky-500 to-emerald-500 flex items-center justify-center shadow-2xl shadow-sky-500/30 text-white"
+        className="fixed bottom-6 right-6 z-[9999] w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 via-sky-500 to-emerald-500 flex items-center justify-center shadow-2xl shadow-sky-500/30 text-white cursor-grab active:cursor-grabbing"
       >
         <AnimatePresence mode="wait">
           {isOpen ? (
