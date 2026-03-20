@@ -288,7 +288,7 @@ app.prepare().then(() => {
   }, 60_000); // every 60 seconds
 
   httpServer.listen(port, () => {
-    console.log(`\n✨ MindMesh server ready at http://${hostname}:${port}`);
+    console.log(`\n✨ MindMesh server ready at https://mind-mesh-refactored.onrender.com/Home`);
     console.log(`📡 Socket.IO ready at ws://${hostname}:${port}/api/socketio`);
     console.log(`⏰ Session checker running every 60 seconds\n`);
   });
