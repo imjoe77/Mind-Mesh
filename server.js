@@ -8,7 +8,7 @@ import { Server as SocketIOServer } from "socket.io";
 import mongoose from "mongoose";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
+const hostname = "0.0.0.0";
 const port = parseInt(process.env.PORT || "3000", 10);
 
 const app = next({ dev, hostname, port });
@@ -37,10 +37,20 @@ function getSessionData(sessionId) {
 const socketUserMap = {};
 
 app.prepare().then(() => {
-  const httpServer = createServer((req, res) => {
-    const parsedUrl = parse(req.url, true);
-    handle(req, res, parsedUrl);
-  });
+ const httpServer = createServer(async (req, res) => {
+  const parsedUrl = parse(req.url, true);
+
+  // ✅ ADD THIS HEALTH CHECK HERE
+  if (parsedUrl.pathname === "/health") {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/plain");
+res.end("OK");
+    return;
+  }
+
+  // 👉 Keep this (Next.js handler)
+  await handle(req, res, parsedUrl);
+});
 
   // Attach Socket.IO
   io = new SocketIOServer(httpServer, {
@@ -266,7 +276,7 @@ app.prepare().then(() => {
   setInterval(async () => {
     try {
       // Hit our own API endpoint to check/activate sessions
-      const res = await fetch(`http://${hostname}:${port}/api/sessions/check`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/sessions/check`);
       const data = await res.json();
 
       if (data.activated > 0) {
@@ -287,8 +297,9 @@ app.prepare().then(() => {
     }
   }, 60_000); // every 60 seconds
 
+  
   httpServer.listen(port, () => {
-    console.log(`\n✨ MindMesh server ready at https://mind-mesh-refactored.onrender.com/Home`);
+    console.log(`\n✨ MindMesh server ready at http://${hostname}:${port}`);
     console.log(`📡 Socket.IO ready at ws://${hostname}:${port}/api/socketio`);
     console.log(`⏰ Session checker running every 60 seconds\n`);
   });
