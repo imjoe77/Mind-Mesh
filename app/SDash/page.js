@@ -907,17 +907,17 @@ function PhoneCard({ profile, onUpdate }) {
         <Phone className="text-gray-400" style={{ width: 14, height: 14 }} />
         <p className="text-xs font-bold text-gray-600">Add Phone Number</p>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <input value={phone} onChange={e => setPhone(e.target.value)}
           placeholder="+91 XXXXX XXXXX" type="tel"
-          className="flex-1 text-sm border border-[#dde0e8] rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-sky-400" />
+          className="flex-1 min-w-0 text-sm border border-[#dde0e8] rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-sky-400" />
         <button onClick={save} disabled={saving}
-          className="px-4 py-2 rounded-xl bg-sky-500 text-white text-xs font-bold disabled:opacity-50">
+          className="flex-shrink-0 px-4 py-2 rounded-xl bg-sky-500 text-white text-xs font-bold disabled:opacity-50">
           {saving ? "..." : "Save"}
         </button>
         {editing && (
           <button onClick={() => setEditing(false)}
-            className="px-3 py-2 rounded-xl bg-[#eff0f3] text-gray-500 text-xs">
+            className="flex-shrink-0 px-3 py-2 rounded-xl bg-[#eff0f3] text-gray-500 text-xs">
             Cancel
           </button>
         )}
@@ -934,17 +934,17 @@ function WelcomeBar({ user, profile }) {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <div className="bg-[#fdfdfe] border-b border-[#e2e5eb] px-6 py-4 shadow-sm">
-      <div className="max-w-[1600px] mx-auto flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-black text-gray-900">
+    <div className="bg-[#fdfdfe] border-b border-[#e2e5eb] px-4 sm:px-6 py-4 shadow-sm">
+      <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base sm:text-lg font-black text-gray-900 truncate">
             {greeting}, {user?.name?.split(" ")[0] || "Student"} 👋
           </h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-gray-500 mt-0.5 truncate">
             {profile?.branch || "Branch not set"} · {profile?.semester || "Semester not set"} · {profile?.institution || "Institution not set"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <div className="w-9 h-9 rounded-xl overflow-hidden bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
             {user?.image
               ? <img src={user.image} alt="" className="w-full h-full object-cover" />
