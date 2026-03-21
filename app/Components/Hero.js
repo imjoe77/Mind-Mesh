@@ -167,7 +167,7 @@ export default function Hero() {
       {/* ── content ── */}
       <motion.div
         style={{ y: contentY, opacity: contentOpacity }}
-        className="relative z-20 text-center max-w-4xl mx-auto px-6 pt-28 pb-24"
+        className="relative z-20 text-center max-w-4xl mx-auto px-5 pt-24 pb-16 sm:pt-28 sm:pb-24"
       >
         {/* badge */}
         <motion.div
@@ -185,7 +185,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.72, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-          className="text-[clamp(2.8rem,7.5vw,5.8rem)] font-black leading-[1.04] tracking-tight mb-6"
+          className="text-[clamp(2.2rem,7.5vw,5.8rem)] font-black leading-[1.04] tracking-tight mb-6"
           style={{ fontFamily: "'Syne', sans-serif" }}
         >
           <span className="text-white block">The study platform</span>
@@ -211,7 +211,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.65, delay: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          className="text-gray-400 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed mb-12"
+          className="text-gray-400 text-base md:text-xl max-w-2xl mx-auto leading-relaxed mb-10 sm:mb-12"
         >
           Create or join live study groups, pair up for peer mentoring, and
           turn your academic strengths into shared progress — all in one
@@ -224,7 +224,7 @@ export default function Hero() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.33, ease: [0.22, 1, 0.36, 1] }}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20"
+            className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 mb-16 sm:mb-20 px-4"
           >
             <Link href="/Home">
               <motion.button
@@ -254,7 +254,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.44 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-12"
+          className="flex flex-wrap items-center justify-center gap-6 sm:gap-12"
         >
           {STATS.map(({ icon: Icon, value, label }, i) => (
             <motion.div
