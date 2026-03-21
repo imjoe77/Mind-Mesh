@@ -16,7 +16,7 @@ export async function GET(req) {
     const mine = searchParams.get("mine") === "true";
     const dateParam = searchParams.get("date"); // e.g. "2024-03-15"
 
-    let query = { isPrivate: false };
+    let query = {}; // Allow all groups, but we'll mark private ones in UI
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -61,8 +61,7 @@ export async function GET(req) {
               { members: session.user.id }
             ]
           }
-        ],
-        isPrivate: false
+        ]
       };
 
       if (subjectConstraint) {
@@ -93,7 +92,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { name, subject, description, maxMembers, isPrivate, tags, sessions, inviteMembers } =
+    const { name, subject, description, maxMembers, isPrivate, passcode, tags, sessions, inviteMembers } =
       await req.json();
 
     if (!name || !subject) {
@@ -120,7 +119,8 @@ export async function POST(req) {
       subject,
       description,
       maxMembers,
-      isPrivate: false,
+      isPrivate,
+      passcode: isPrivate ? passcode : null,
       tags,
       sessions,
       owner: session.user.id,
