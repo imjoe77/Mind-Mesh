@@ -801,7 +801,7 @@ function SkillsCard({ profile, onUpdate }) {
         <div className="flex items-center gap-2 mt-2">
           <input value={input} onChange={e => setInput(e.target.value)}
             placeholder="Add skill..."
-            className="flex-1 text-xs border border-[#dde0e8] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            className="flex-1 text-xs border border-[#dde0e8] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-sky-400 bg-white text-gray-900"
             onKeyDown={e => {
               if (e.key === "Enter") { addSkill(type, input); setInput(""); setAdding(false); }
               if (e.key === "Escape") { setInput(""); setAdding(false); }
@@ -910,7 +910,7 @@ function PhoneCard({ profile, onUpdate }) {
       <div className="flex flex-wrap gap-2">
         <input value={phone} onChange={e => setPhone(e.target.value)}
           placeholder="+91 XXXXX XXXXX" type="tel"
-          className="flex-1 min-w-0 text-sm border border-[#dde0e8] rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-sky-400" />
+          className="flex-1 min-w-0 text-sm border border-[#dde0e8] rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-sky-400 bg-white text-gray-900" />
         <button onClick={save} disabled={saving}
           className="flex-shrink-0 px-4 py-2 rounded-xl bg-sky-500 text-white text-xs font-bold disabled:opacity-50">
           {saving ? "..." : "Save"}
