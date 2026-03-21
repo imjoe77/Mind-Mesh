@@ -526,7 +526,21 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
 /* ══════════════════════════════════════════════════════════════════
    MEDIA PANEL — WebRTC mesh for multi-user video/screen
 ══════════════════════════════════════════════════════════════════ */
-const ICE_CFG = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] };
+const ICE_CFG = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+  ],
+  iceCandidatePoolSize: 10,
+};
+
+// Detect mobile devices
+const isMobileDevice = () => {
+  if (typeof window === "undefined") return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
 
 function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, sessionUsers }) {
   const camVideoRef = useRef(null);
@@ -600,7 +614,7 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     return pc;
   };
 
-  // ── When our streams change → send offers to all session peers ──
+  // ── When our streams change → send offers to session peers we are NOT already connected to ──
   useEffect(() => {
     if (!socket || !session?.user?.id) return;
     const hasStream = camStream || screenStream;
@@ -610,14 +624,18 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     const timer = setTimeout(() => {
       (sessionUsers || []).forEach(u => {
         if (u.socketId && u.socketId !== socket.id) {
-          console.log("[RTC] Initiating connection to", u.userName || u.socketId);
-          makePeer(u.socketId, true, u.userName);
+          // Only initiate if we don't already have an active/stable peer connection
+          const existing = peersRef.current[u.socketId];
+          if (!existing || existing.iceConnectionState === "failed" || existing.iceConnectionState === "closed" || existing.iceConnectionState === "disconnected") {
+            console.log("[RTC] Initiating connection to", u.userName || u.socketId);
+            makePeer(u.socketId, true, u.userName);
+          }
         }
       });
-    }, 300);
+    }, 500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camStream, screenStream, sessionUsers, socket, session?.user?.id]);
+  }, [camStream, screenStream, socket, session?.user?.id]);
 
   // ── Socket signaling handlers ──
   useEffect(() => {
@@ -707,8 +725,17 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       setRemoteStreams({});
       if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
     } else {
+      // Screen share is not supported on most mobile browsers
+      if (isMobileDevice()) {
+        toast.info("📱 Screen sharing is only available on desktop browsers.");
+        return;
+      }
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        toast.error("Screen sharing is not supported in this browser.");
+        return;
+      }
       try {
-        const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const s = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
         setScreenStream(s);
         if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "on" });
         s.getVideoTracks()[0].onended = () => {
@@ -718,12 +745,31 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
           setRemoteStreams({});
           if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
         };
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        if (err.name !== "NotAllowedError") {
+          console.error("[Screen Share]", err);
+          toast.error("Could not start screen sharing.");
+        }
+      }
     }
   };
 
-  useEffect(() => { if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream; }, [camStream]);
-  useEffect(() => { if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream; }, [screenStream]);
+  // Attach local streams to video elements via srcObject (not via re-render to avoid flicker)
+  useEffect(() => {
+    if (camVideoRef.current && camStream) {
+      if (camVideoRef.current.srcObject !== camStream) {
+        camVideoRef.current.srcObject = camStream;
+      }
+    }
+  }, [camStream]);
+
+  useEffect(() => {
+    if (screenVideoRef.current && screenStream) {
+      if (screenVideoRef.current.srcObject !== screenStream) {
+        screenVideoRef.current.srcObject = screenStream;
+      }
+    }
+  }, [screenStream]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -758,7 +804,7 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       <div className={`grid ${gridCols} gap-3 flex-1`}>
         {camStream && (
           <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
-            <video ref={camVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+            <video ref={camVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
             <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
               <Camera style={{width: 10, height: 10}} /> You (Camera)
             </div>
@@ -798,7 +844,8 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-3 md:p-5 text-center">
         <h3 className="text-sm font-bold text-sky-400 mb-1">Live Classroom</h3>
         <p className="text-xs text-gray-500 max-w-md mx-auto">
-          Camera and screen share are visible to all members in real-time via peer-to-peer WebRTC.
+          Camera is visible to all members in real-time via peer-to-peer WebRTC.
+          {isMobileDevice() && <span className="block mt-1 text-amber-400">📱 Screen sharing requires a desktop browser.</span>}
         </p>
       </div>
     </div>
