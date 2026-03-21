@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, useInView, AnimatePresence } from "framer-motion";
-import { Search, Calendar, Users, ArrowRight, Plus, Radio, X, Zap } from "lucide-react";
+import { Search, Calendar, Users, ArrowRight, Plus, Radio, X, Zap, Lock } from "lucide-react";
 import { toast } from "react-toastify";
 
 /* ── per-card cursor glare ─────────────────────────────────────────── */
@@ -59,6 +59,14 @@ function GroupCard({ group, role, isActioning, isFull, isLive, onJoin, onLeave }
           <div className="absolute top-5 right-5 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
             Live
+          </div>
+        )}
+
+        {/* private room badge */}
+        {group.isPrivate && (
+          <div className={`absolute top-5 ${isLive ? 'right-20' : 'right-5'} flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold uppercase tracking-widest`}>
+            <Lock style={{ width: 10, height: 10 }} />
+            Private
           </div>
         )}
 
@@ -197,9 +205,22 @@ export default function GroupsPage() {
 
   const handleJoin = async (groupId) => {
     if (!session) { router.push("/Login"); return; }
+
+    // Check if group is private
+    const targetGroup = allGroups.find(g => g._id === groupId);
+    let providedPasscode = null;
+    if (targetGroup?.isPrivate) {
+      providedPasscode = prompt("This room is private. Enter numeric passcode to join:");
+      if (providedPasscode === null) return; // user cancelled
+    }
+
     setActionLoading(p => ({ ...p, [groupId]: "joining" }));
     try {
-      const res = await fetch(`/api/groups/${groupId}/join`, { method: "POST" });
+      const res = await fetch(`/api/groups/${groupId}/join`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: providedPasscode }) 
+      });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join"); }
       await fetchGroups(dateFilter, subjectFilter);
       toast.success("Joined group!");
