@@ -59,7 +59,7 @@ export default function CTA() {
           initial={{ opacity: 0, scale: 0.97, y: 20 }}
           animate={inView ? { opacity: 1, scale: 1, y: 0 } : {}}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="relative rounded-[2rem] overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900 to-[#060810] p-12 md:p-20 text-center"
+          className="relative rounded-[2rem] overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900 to-[#060810] p-8 sm:p-12 md:p-20 text-center"
         >
           {/* card glow */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[280px] bg-sky-500/10 blur-[90px] rounded-full pointer-events-none" />
@@ -110,7 +110,7 @@ export default function CTA() {
               </div>
             )}
 
-            <div className="mt-14 flex items-center justify-center gap-10 opacity-40">
+            <div className="mt-10 sm:mt-14 flex flex-wrap items-center justify-center gap-8 sm:gap-10 opacity-40">
               {[['12k+', 'Students'], ['4.9/5', 'Rating'], ['24/7', 'Sessions']].map(([val, lbl], i) => (
                 <div key={i} className="flex flex-col items-center gap-0.5">
                   <span className="text-white text-lg font-bold">{val}</span>
