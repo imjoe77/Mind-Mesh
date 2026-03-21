@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, BookOpen, FileText, Tag, Calendar,
-  Clock, AlignLeft, AlertCircle, ArrowLeft, Plus, X,
+  Clock, AlignLeft, AlertCircle, ArrowLeft, Plus, X, Lock,
 } from "lucide-react";
 import { toast } from "react-toastify";
 
@@ -65,6 +65,9 @@ function CreateGroupForm() {
   const [tags,         setTags]         = useState("");
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState("");
+
+  const [isPrivate,    setIsPrivate]    = useState(false);
+  const [passcode,     setPasscode]     = useState("");
 
   const [todayStr,   setTodayStr]   = useState("");
   const [nowTimeStr, setNowTimeStr] = useState("");
@@ -131,7 +134,8 @@ function CreateGroupForm() {
           subject,
           description,
           maxMembers: Number(members) || 20,
-          isPrivate: false,
+          isPrivate,
+          passcode: isPrivate ? passcode : null,
           tags: tags ? tags.split(",").map(t => t.trim()).filter(Boolean) : [],
           sessions,
           inviteMembers: inviteId ? [inviteId] : [],
@@ -289,7 +293,7 @@ function CreateGroupForm() {
                 className={inputCls + " resize-none"} />
             </Field>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Max Members" icon={Users}>
                 <input type="number" placeholder="20" min={2} max={100}
                   value={members} onChange={e => setMembers(e.target.value)}
@@ -311,7 +315,7 @@ function CreateGroupForm() {
                 onChange={handleDateChange} className={inputCls} />
             </Field>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Start Time" icon={Clock}
                 hint={date === todayStr ? "Must be after current time" : undefined}>
                 <input type="time" value={startTime} min={minStartTime}
@@ -331,6 +335,33 @@ function CreateGroupForm() {
                 value={sessionNote} onChange={e => setSessionNote(e.target.value)}
                 disabled={!date} className={inputCls} />
             </Field>
+
+            {/* ── privacy settings ── */}
+            <Divider icon={Lock} label="Privacy Settings" />
+            <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-4 space-y-4 shadow-inner">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-gray-200">Private Room</h4>
+                  <p className="text-[10px] text-gray-500 max-w-[200px]">Require a numeric passcode to join this group</p>
+                </div>
+                <button type="button" onClick={() => setIsPrivate(!isPrivate)}
+                  className={`w-12 h-6 rounded-full transition-all relative ${isPrivate ? 'bg-sky-500 shadow-inner' : 'bg-white/[0.05] border border-white/[0.1]'}`}>
+                  <motion.div animate={{ x: isPrivate ? 26 : 4 }} className={`w-4 h-4 rounded-full absolute top-1 ${isPrivate ? 'bg-white shadow-lg' : 'bg-gray-600'}`} />
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {isPrivate && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-t border-white/[0.06] pt-4">
+                    <Field label="Numeric Passcode (4-6 digits)" icon={Lock} required>
+                       <input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 1234" maxLength={6}
+                         value={passcode} onChange={e => setPasscode(e.target.value.replace(/[^0-9]/g, ''))}
+                         className={inputCls} required={isPrivate} />
+                    </Field>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* ── submit row ── */}
             <div className="flex gap-3 pt-2 border-t border-white/[0.06]">
