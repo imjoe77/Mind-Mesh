@@ -536,6 +536,29 @@ const ICE_CFG = {
   iceCandidatePoolSize: 10,
 };
 
+// Robust helper component for individual remote streams to ensure srcObject attachment
+function RemoteVideo({ sid, stream, userName }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+        console.log(`[RTC] Stream attached for ${userName} (${sid})`);
+      }
+    }
+  }, [stream, sid, userName]);
+
+  return (
+    <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
+      <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+      <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1 group-hover:bg-black/80 transition-all border border-white/[0.05]">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        {userName}
+      </div>
+    </div>
+  );
+}
+
 // Detect mobile devices
 const isMobileDevice = () => {
   if (typeof window === "undefined") return false;
@@ -548,25 +571,30 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
   const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { stream, userName } }
 
-  // Refs to avoid stale closures in async WebRTC callbacks
+  // Use refs to avoid stale closures in WebRTC callbacks
+  const socketRef = useRef(socket);
+  const sessionRef = useRef(session);
+  const usersRef = useRef(sessionUsers);
   const camRef = useRef(camStream);
   const screenRef = useRef(screenStream);
-  const socketRef = useRef(socket);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => { usersRef.current = sessionUsers; }, [sessionUsers]);
   useEffect(() => { camRef.current = camStream; }, [camStream]);
   useEffect(() => { screenRef.current = screenStream; }, [screenStream]);
-  useEffect(() => { socketRef.current = socket; }, [socket]);
 
-  // ── Helper: get all current local tracks ──
-  const getLocalTracks = () => {
+  // Track the tracks we've added to each peer to avoid duplicates
+  const localTracksRef = useRef([]);
+
+  const getLocalStreamTracks = () => {
     const tracks = [];
-    if (camRef.current) camRef.current.getTracks().forEach(t => tracks.push({ track: t, stream: camRef.current }));
-    if (screenRef.current) screenRef.current.getTracks().forEach(t => tracks.push({ track: t, stream: screenRef.current }));
+    if (camStream) tracks.push({ track: camStream.getTracks()[0], stream: camStream });
+    if (screenStream) tracks.push({ track: screenStream.getTracks()[0], stream: screenStream });
     return tracks;
   };
 
-  // ── Create a fresh peer connection to targetSocketId ──
+  // ── Create a fresh peer connection ──
   const makePeer = (targetSocketId, initiator, userName) => {
-    // Close any existing connection to this peer
     if (peersRef.current[targetSocketId]) {
       peersRef.current[targetSocketId].close();
       delete peersRef.current[targetSocketId];
@@ -575,9 +603,11 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     const pc = new RTCPeerConnection(ICE_CFG);
     peersRef.current[targetSocketId] = pc;
 
-    // Add our local tracks
-    getLocalTracks().forEach(({ track, stream }) => {
-      try { pc.addTrack(track, stream); } catch (e) { console.warn("[RTC] addTrack:", e); }
+    // Direct track addition
+    getLocalStreamTracks().forEach(({ track, stream }) => {
+      if (track) {
+        try { pc.addTrack(track, stream); } catch (e) { console.warn("[RTC] addTrack:", e); }
+      }
     });
 
     pc.onicecandidate = (e) => {
@@ -587,18 +617,25 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     };
 
     pc.ontrack = (e) => {
-      setRemoteStreams(prev => ({
-        ...prev,
-        [targetSocketId]: { stream: e.streams[0], userName: userName || prev[targetSocketId]?.userName || "Peer" }
-      }));
+      console.log(`[RTC] Inbound track from ${userName} (${targetSocketId})`);
+      setRemoteStreams(prev => {
+        const inboundStream = e.streams[0] || new MediaStream([e.track]);
+        return {
+          ...prev,
+          [targetSocketId]: { stream: inboundStream, userName: userName || prev[targetSocketId]?.userName || "Peer" }
+        };
+      });
     };
 
     pc.oniceconnectionstatechange = () => {
       const s = pc.iceConnectionState;
-      if (s === "disconnected" || s === "failed" || s === "closed") {
-        pc.close();
-        delete peersRef.current[targetSocketId];
-        setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
+      if (s === "failed" || s === "closed" || s === "disconnected") {
+        console.log(`[RTC] Peer ${targetSocketId} connection state: ${s}`);
+        if (s === "closed" || s === "failed") {
+          pc.close();
+          delete peersRef.current[targetSocketId];
+          setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
+        }
       }
     };
 
@@ -606,7 +643,7 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
         socketRef.current?.emit("webrtc-offer", {
           sessionId, to: targetSocketId, offer: pc.localDescription,
-          fromUserId: session?.user?.id, fromUserName: session?.user?.name
+          fromUserId: sessionRef.current?.user?.id, fromUserName: sessionRef.current?.user?.name
         });
       }).catch(e => console.error("[RTC] offer error:", e));
     }
@@ -614,35 +651,52 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     return pc;
   };
 
-  // ── When our streams change → send offers to session peers we are NOT already connected to ──
+  // ── Sync: When WE start/stop sharing, let others know and reconnect if needed ──
   useEffect(() => {
-    if (!socket || !session?.user?.id) return;
     const hasStream = camStream || screenStream;
-    if (!hasStream) return;
+    if (!hasStream || !socket) return;
 
-    // Small delay to let React state settle
+    // Small delay to ensure state and DOM are ready
     const timer = setTimeout(() => {
-      (sessionUsers || []).forEach(u => {
+      (usersRef.current || []).forEach(u => {
         if (u.socketId && u.socketId !== socket.id) {
-          // Only initiate if we don't already have an active/stable peer connection
-          const existing = peersRef.current[u.socketId];
-          if (!existing || existing.iceConnectionState === "failed" || existing.iceConnectionState === "closed" || existing.iceConnectionState === "disconnected") {
-            console.log("[RTC] Initiating connection to", u.userName || u.socketId);
+          const pc = peersRef.current[u.socketId];
+          // If no connection OR failed/closed, start a new one
+          if (!pc || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+            const userName = u.userName || u.userId || "Peer";
+            console.log(`[RTC] Connecting to ${userName}`);
+            makePeer(u.socketId, true, userName);
+          } else {
+            // Already connected, we might need new tracks
             makePeer(u.socketId, true, u.userName);
           }
         }
       });
-    }, 500);
+    }, 400);
+
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camStream, screenStream, socket, session?.user?.id]);
+  }, [camStream, screenStream, socket]);
 
-  // ── Socket signaling handlers ──
+  // Handle new users
+  useEffect(() => {
+    if (!socket || (!camStream && !screenStream)) return;
+    const currentPeers = Object.keys(peersRef.current);
+    (sessionUsers || []).forEach(u => {
+      if (u.socketId && u.socketId !== socket.id && !currentPeers.includes(u.socketId)) {
+        console.log(`[RTC] Auto-connecting to new guest: ${u.userName}`);
+        makePeer(u.socketId, true, u.userName);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionUsers, socket]);
+
+  // ── Signaling callbacks ──
   useEffect(() => {
     if (!socket) return;
 
     const handleOffer = async ({ from, offer, fromUserName }) => {
-      console.log("[RTC] Received offer from", fromUserName || from);
+      console.log(`[RTC] Offer from ${fromUserName}`);
       const pc = makePeer(from, false, fromUserName);
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -664,19 +718,18 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       const pc = peersRef.current[from];
       if (pc && pc.remoteDescription) {
         try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-        catch (e) { /* often benign */ }
+        catch (e) { /* silent */ }
       }
     };
 
-    // When another user signals they started streaming, connect to them
     const handleMediaStatus = ({ userId, userName, type, status }) => {
-      if (status === "on" && userId !== session?.user?.id) {
-        // The remote user will send us an offer, so we don't need to initiate
-        // But if WE have streams, we should initiate to them too
-        if (camRef.current || screenRef.current) {
-          const targetSocket = (sessionUsers || []).find(u => u.userId === userId);
-          if (targetSocket && !peersRef.current[targetSocket.socketId]) {
-            setTimeout(() => makePeer(targetSocket.socketId, true, userName), 500);
+      if (status === "on" && userId !== sessionRef.current?.user?.id) {
+        const target = (usersRef.current || []).find(u => u.userId === userId);
+        if (target && !peersRef.current[target.socketId]) {
+          console.log(`[RTC] Establishing link with ${userName}...`);
+          // If we have music/stream, initiate
+          if (camRef.current || screenRef.current) {
+            makePeer(target.socketId, true, userName);
           }
         }
       }
@@ -694,158 +747,108 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       socket.off("media-status", handleMediaStatus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, sessionUsers, session?.user?.id]);
+  }, [socket]);
 
-  // ── Camera toggle ──
+  // Controls
   const toggleCam = async () => {
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
       setCamStream(null);
-      // Close all peers (they'll reconnect if needed)
-      Object.values(peersRef.current).forEach(pc => pc.close());
-      peersRef.current = {};
-      setRemoteStreams({});
       if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "off" });
     } else {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
         setCamStream(s);
         if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "on" });
-      } catch { toast.error("Camera access denied."); }
+      } catch { toast.error("Camera/Mic access denied."); }
     }
   };
 
-  // ── Screen share toggle ──
   const toggleScreen = async () => {
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
       setScreenStream(null);
-      Object.values(peersRef.current).forEach(pc => pc.close());
-      peersRef.current = {};
-      setRemoteStreams({});
       if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
     } else {
-      // Screen share is not supported on most mobile browsers
-      if (isMobileDevice()) {
-        toast.info("📱 Screen sharing is only available on desktop browsers.");
-        return;
-      }
-      if (!navigator.mediaDevices?.getDisplayMedia) {
-        toast.error("Screen sharing is not supported in this browser.");
-        return;
-      }
+      if (isMobileDevice()) { toast.info("📱 Screen sharing is unavailable on mobile."); return; }
       try {
-        const s = await navigator.mediaDevices.getDisplayMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+        const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
         setScreenStream(s);
         if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "on" });
         s.getVideoTracks()[0].onended = () => {
           setScreenStream(null);
-          Object.values(peersRef.current).forEach(pc => pc.close());
-          peersRef.current = {};
-          setRemoteStreams({});
           if (socket) socket.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
         };
-      } catch (err) {
-        if (err.name !== "NotAllowedError") {
-          console.error("[Screen Share]", err);
-          toast.error("Could not start screen sharing.");
-        }
-      }
+      } catch {}
     }
   };
 
-  // Attach local streams to video elements via srcObject (not via re-render to avoid flicker)
+  // Local stream attachment
   useEffect(() => {
-    if (camVideoRef.current && camStream) {
-      if (camVideoRef.current.srcObject !== camStream) {
-        camVideoRef.current.srcObject = camStream;
-      }
-    }
+    if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream;
   }, [camStream]);
-
   useEffect(() => {
-    if (screenVideoRef.current && screenStream) {
-      if (screenVideoRef.current.srcObject !== screenStream) {
-        screenVideoRef.current.srcObject = screenStream;
-      }
-    }
+    if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream;
   }, [screenStream]);
 
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
-    return () => { Object.values(peersRef.current).forEach(pc => pc.close()); peersRef.current = {}; };
+    return () => { Object.values(peersRef.current).forEach(p => p.close()); peersRef.current = {}; };
   }, []);
 
   const remoteEntries = Object.entries(remoteStreams);
-  const totalVideos = (camStream ? 1 : 0) + (screenStream ? 1 : 0) + remoteEntries.length;
-  const gridCols = totalVideos <= 1 ? "grid-cols-1" : totalVideos <= 4 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-2 md:grid-cols-3";
+  const total = (camStream ? 1 : 0) + (screenStream ? 1 : 0) + remoteEntries.length;
+  const grid = total <= 1 ? "grid-cols-1" : total <= 4 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-2 md:grid-cols-3";
 
   return (
     <div className="flex flex-col gap-4 p-3 md:p-5 h-full overflow-y-auto">
-      {/* Controls */}
-      <div className="flex gap-3 justify-center flex-wrap">
-        <button onClick={toggleCam}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${camStream ? "bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30" : "bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/20"}`}>
-          <Camera style={{ width: 16, height: 16 }} />{camStream ? "Stop Camera" : "Start Camera"}
+      <div className="flex gap-3 justify-center">
+        <button onClick={toggleCam} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${camStream ? "bg-rose-500/20 border-rose-500/30 text-rose-400" : "bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-500/20"}`}>
+          <Camera style={{ width: 14, height: 14 }} /> {camStream ? "Stop Camera" : "Start Camera"}
         </button>
-        <button onClick={toggleScreen}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${screenStream ? "bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30" : "bg-white/[0.05] border border-white/[0.08] text-gray-300 hover:bg-white/[0.08]"}`}>
-          <Monitor style={{ width: 16, height: 16 }} />{screenStream ? "Stop Sharing" : "Share Screen"}
+        <button onClick={toggleScreen} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all ${screenStream ? "bg-rose-500/20 border-rose-500/30 text-rose-400" : "bg-white/[0.05] border border-white/[0.08] text-gray-300 hover:bg-white/[0.08]"}`}>
+          <Monitor style={{ width: 14, height: 14 }} /> {screenStream ? "Stop Sharing" : "Share Screen"}
         </button>
       </div>
 
-      {/* Participant count */}
-      <div className="text-center text-[10px] text-gray-500 font-semibold">
-        {(sessionUsers || []).length} member{(sessionUsers || []).length !== 1 ? "s" : ""} in session
-        {remoteEntries.length > 0 && <span className="text-emerald-400 ml-2">• {remoteEntries.length} connected</span>}
+      <div className="text-center text-[10px] text-gray-600 font-bold uppercase tracking-widest">
+        {(sessionUsers || []).length} present
+        {remoteEntries.length > 0 && <span className="text-emerald-500 ml-2">• {remoteEntries.length} connected</span>}
       </div>
 
-      {/* Video grid — Google Meet style */}
-      <div className={`grid ${gridCols} gap-3 flex-1`}>
+      <div className={`grid ${grid} gap-3`}>
         {camStream && (
           <div className="relative aspect-video rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0d1117]">
             <video ref={camVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
-              <Camera style={{width: 10, height: 10}} /> You (Camera)
+            <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold border border-white/[0.05]">
+              You (Camera)
             </div>
           </div>
         )}
         {screenStream && (
-          <div className="relative aspect-video rounded-2xl overflow-hidden border border-sky-500/20 bg-[#0d1117]">
+          <div className="relative aspect-video rounded-2xl overflow-hidden border border-sky-500/30 bg-[#0d1117]">
             <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
-              <Monitor style={{width: 10, height: 10}} /> You (Screen)
+            <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold border border-white/[0.05]">
+              You (Screen)
             </div>
           </div>
         )}
         {remoteEntries.map(([sid, { stream, userName }]) => (
-          <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117]">
-            <video autoPlay playsInline className="w-full h-full object-cover" ref={el => { if (el && stream) el.srcObject = stream; }} />
-            <div className="absolute bottom-2 left-2 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {userName}
-            </div>
-          </div>
+          <RemoteVideo key={sid} sid={sid} stream={stream} userName={userName} />
         ))}
       </div>
 
-      {totalVideos === 0 && (
-        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
-          <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center">
-            <Video className="text-gray-600" style={{ width: 28, height: 28 }} />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-gray-400 mb-1">No active streams</h3>
-            <p className="text-xs text-gray-600 max-w-sm">Start your camera or share your screen. All members can see each other — like Google Meet!</p>
-          </div>
+      {total === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center py-10 opacity-40">
+          <Video className="text-gray-400 mb-3" style={{ width: 40, height: 40 }} />
+          <p className="text-sm font-bold text-gray-500">Live study room is active</p>
+          <p className="text-xs text-gray-600">Start your camera to see others</p>
         </div>
       )}
 
-      <div className="rounded-xl border border-sky-500/15 bg-sky-500/[0.04] p-3 md:p-5 text-center">
-        <h3 className="text-sm font-bold text-sky-400 mb-1">Live Classroom</h3>
-        <p className="text-xs text-gray-500 max-w-md mx-auto">
-          Camera is visible to all members in real-time via peer-to-peer WebRTC.
-          {isMobileDevice() && <span className="block mt-1 text-amber-400">📱 Screen sharing requires a desktop browser.</span>}
+      <div className="mt-auto p-4 rounded-xl border border-sky-500/15 bg-sky-500/[0.04] text-center">
+        <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
+          Connected via Peer-to-Peer WebRTC. High quality video depends on your network stability.
         </p>
       </div>
     </div>
