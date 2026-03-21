@@ -16,6 +16,17 @@ export async function POST(req, { params }) {
     const group = await Group.findById(groupId);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
+    // Numeric Passcode Check
+    if (group.isPrivate && group.passcode) {
+      const { passcode: providedPasscode } = await req.json().catch(() => ({}));
+      if (!providedPasscode) {
+        return NextResponse.json({ error: "Passcode required", code: "PASSCODE_REQUIRED" }, { status: 403 });
+      }
+      if (providedPasscode !== group.passcode) {
+        return NextResponse.json({ error: "Incorrect passcode", code: "INCORRECT_PASSCODE" }, { status: 403 });
+      }
+    }
+
     const userId = session.user.id;
 
     if (group.members.map(String).includes(userId)) {
