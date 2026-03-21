@@ -151,7 +151,7 @@ export default function MittarChat() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 100, scale: 0.8 }}
             transition={{ type: "spring", stiffness: 260, damping: 20 }}
-            className="fixed bottom-24 right-6 z-[9999] w-[350px] sm:w-[400px] h-[550px] bg-[#0d1117] border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl flex flex-col backdrop-blur-xl"
+            className="fixed bottom-24 sm:bottom-24 right-4 sm:right-6 z-[9999] w-[calc(100vw-32px)] sm:w-[400px] max-w-[400px] h-[calc(100vh-140px)] sm:h-[550px] max-h-[700px] bg-[#0d1117] border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl flex flex-col backdrop-blur-xl"
             style={{
               boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.05)"
             }}
