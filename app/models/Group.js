@@ -30,6 +30,7 @@ const GroupSchema = new mongoose.Schema(
     members: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     maxMembers: { type: Number, default: 20, min: 2, max: 100 },
     isPrivate: { type: Boolean, default: false },
+    passcode: { type: String, default: null }, // Numeric passcode for private rooms
     sessions: [SessionSchema],
     comments: [CommentSchema],
     tags: [{ type: String, trim: true }],
