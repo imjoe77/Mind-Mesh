@@ -14,9 +14,6 @@ import { toast } from "react-toastify";
 import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 
-/* ══════════════════════════════════════════════════════════════════
-   POMODORO
-══════════════════════════════════════════════════════════════════ */
 function PomodoroPanel({ socket, sessionId }) {
   const MODES  = { work: 25 * 60, short: 5 * 60, long: 15 * 60 };
   const LABELS = { work: "Focus", short: "Short Break", long: "Long Break" };
@@ -75,7 +72,6 @@ function PomodoroPanel({ socket, sessionId }) {
     const nextVal = !running;
     setRunning(nextVal);
     if (nextVal) {
-      // Starting the timer — broadcast to ALL so everyone gets redirected
       if (socket) socket.emit("pomodoro-start", { sessionId, state: { mode, secs, running: true, cycles } });
     }
     emitSync({ running: nextVal });
@@ -136,9 +132,6 @@ function PomodoroPanel({ socket, sessionId }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   WHITEBOARD
-══════════════════════════════════════════════════════════════════ */
 function WhiteboardPanel({ socket, sessionId }) {
   const canvasRef = useRef(null);
   const [tool, setTool]   = useState("pen");
@@ -241,14 +234,6 @@ function WhiteboardPanel({ socket, sessionId }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   PDF PANEL
-══════════════════════════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════════════════════════
-   PDF PANEL
-   Step 1: Upload → /api/pdf → pdfreader extracts real text
-   Step 2: Q&A → /api/chat → OpenRouter Llama with full doc context
-══════════════════════════════════════════════════════════════════ */
 function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, session }) {
   const [fileName,   setFileName]   = useState("");
   const [docText,    setDocText]    = useState("");
@@ -270,7 +255,6 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
   const [dragging,   setDragging]   = useState(false);
   const [ocrUsed,    setOcrUsed]    = useState(false);
 
-  // Restore content from global sync if available (eg. on joining session)
   useEffect(() => {
     if (syncedContent) {
       if (syncedContent.keyPoints) setKeyPoints(syncedContent.keyPoints);
@@ -278,7 +262,6 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
     }
   }, [syncedContent]);
 
-  // Listen for synced PDF content (keyPoints + Q&A) from other users while panel is open
   useEffect(() => {
     if (!socket) return;
     const onContentSync = (data) => {
@@ -288,6 +271,7 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
     socket.on("pdf-content-sync", onContentSync);
     return () => socket.off("pdf-content-sync", onContentSync);
   }, [socket]);
+
   const fileRef   = useRef(null);
   const bottomRef = useRef(null);
 
@@ -297,7 +281,7 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
 
   const acquireLock = () => {
     if (!socket || isLockedByMe) return true;
-    if (isLockedByOther) { toast.error(`\ud83d\udd12 PDF is being used by ${pdfLock.userName}`); return false; }
+    if (isLockedByOther) { toast.error(`🔒 PDF is being used by ${pdfLock.userName}`); return false; }
     socket.emit("feature-lock", { sessionId, feature: "pdf", userId: session?.user?.id, userName: session?.user?.name });
     return true;
   };
@@ -321,10 +305,7 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
         form.append("file", file);
         const res  = await fetch("/api/pdf", { method: "POST", body: form });
         const data = await res.json();
-        if (data.isScanned) {
-          // Scanned PDF — guide user to use txt instead
-          throw new Error("scanned");
-        }
+        if (data.isScanned) throw new Error("scanned");
         if (data.error) throw new Error(data.error);
         text = data.documentText || "";
         setOcrUsed(false);
@@ -332,10 +313,7 @@ function PDFPanel({ socket, sessionId, syncedData, syncedContent, featureLocks, 
       }
       setDocText(text);
       setOcrUsed(false);
-      // Emit sync for other users
-      if (socket) {
-        socket.emit("pdf-sync", { sessionId, fileName: file.name, docText: text });
-      }
+      if (socket) socket.emit("pdf-sync", { sessionId, fileName: file.name, docText: text });
       await autoExtract(text);
     } catch (e) {
       console.error("[PDF_UPLOAD]", e);
@@ -361,7 +339,6 @@ ${text.slice(0, 5000)}`;
       if (match) {
         const parsed = JSON.parse(match[0]);
         setKeyPoints(parsed);
-        // Sync key points to all users
         if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints: parsed, messages: [] });
       }
     } catch (e) { console.error("[PDF_AUTOEXTRACT]", e); }
@@ -388,7 +365,6 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
       const newMsg = { role: "assistant", text: data.reply || "No response received." };
       setMessages(prev => {
         const updated = [...prev, newMsg];
-        // Sync Q&A to all users
         if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints, messages: updated });
         return updated;
       });
@@ -523,9 +499,6 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   MEDIA PANEL — WebRTC mesh for multi-user video/screen
-══════════════════════════════════════════════════════════════════ */
 const ICE_CFG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -536,7 +509,6 @@ const ICE_CFG = {
   iceCandidatePoolSize: 10,
 };
 
-// Robust helper component for individual remote streams to ensure srcObject attachment
 function RemoteVideo({ sid, stream, userName }) {
   const videoRef = useRef(null);
   useEffect(() => {
@@ -549,7 +521,7 @@ function RemoteVideo({ sid, stream, userName }) {
   }, [stream, sid, userName]);
 
   return (
-    <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
+    <div className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
       <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
       <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1 group-hover:bg-black/80 transition-all border border-white/[0.05]">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -559,7 +531,6 @@ function RemoteVideo({ sid, stream, userName }) {
   );
 }
 
-// Detect mobile devices
 const isMobileDevice = () => {
   if (typeof window === "undefined") return false;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -568,10 +539,9 @@ const isMobileDevice = () => {
 function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, sessionUsers }) {
   const camVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
-  const peersRef = useRef({}); // { socketId: RTCPeerConnection }
-  const [remoteStreams, setRemoteStreams] = useState({}); // { socketId: { stream, userName } }
+  const peersRef = useRef({});
+  const [remoteStreams, setRemoteStreams] = useState({});
 
-  // Use refs to avoid stale closures in WebRTC callbacks
   const socketRef = useRef(socket);
   const sessionRef = useRef(session);
   const usersRef = useRef(sessionUsers);
@@ -583,9 +553,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
   useEffect(() => { camRef.current = camStream; }, [camStream]);
   useEffect(() => { screenRef.current = screenStream; }, [screenStream]);
 
-  // Track the tracks we've added to each peer to avoid duplicates
-  const localTracksRef = useRef([]);
-
   const getLocalStreamTracks = () => {
     const tracks = [];
     if (camStream) tracks.push({ track: camStream.getTracks()[0], stream: camStream });
@@ -593,7 +560,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     return tracks;
   };
 
-  // ── Create a fresh peer connection ──
   const makePeer = (targetSocketId, initiator, userName) => {
     if (peersRef.current[targetSocketId]) {
       peersRef.current[targetSocketId].close();
@@ -603,7 +569,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     const pc = new RTCPeerConnection(ICE_CFG);
     peersRef.current[targetSocketId] = pc;
 
-    // Direct track addition
     getLocalStreamTracks().forEach(({ track, stream }) => {
       if (track) {
         try { pc.addTrack(track, stream); } catch (e) { console.warn("[RTC] addTrack:", e); }
@@ -616,13 +581,23 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       }
     };
 
+    // FIX 1: Robust ontrack handler
     pc.ontrack = (e) => {
-      console.log(`[RTC] Inbound track from ${userName} (${targetSocketId})`);
+      console.log(`[RTC] Inbound track from ${userName} (${targetSocketId})`, e.track.kind);
       setRemoteStreams(prev => {
-        const inboundStream = e.streams[0] || new MediaStream([e.track]);
+        const existing = prev[targetSocketId];
+        let inboundStream;
+        if (e.streams && e.streams[0]) {
+          inboundStream = e.streams[0];
+        } else if (existing?.stream) {
+          existing.stream.addTrack(e.track);
+          inboundStream = existing.stream;
+        } else {
+          inboundStream = new MediaStream([e.track]);
+        }
         return {
           ...prev,
-          [targetSocketId]: { stream: inboundStream, userName: userName || prev[targetSocketId]?.userName || "Peer" }
+          [targetSocketId]: { stream: inboundStream, userName: userName || existing?.userName || "Peer" }
         };
       });
     };
@@ -651,47 +626,43 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     return pc;
   };
 
-  // ── Sync: When WE start/stop sharing, let others know and reconnect if needed ──
   useEffect(() => {
     const hasStream = camStream || screenStream;
     if (!hasStream || !socket) return;
-
-    // Small delay to ensure state and DOM are ready
     const timer = setTimeout(() => {
       (usersRef.current || []).forEach(u => {
         if (u.socketId && u.socketId !== socket.id) {
           const pc = peersRef.current[u.socketId];
-          // If no connection OR failed/closed, start a new one
           if (!pc || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
             const userName = u.userName || u.userId || "Peer";
             console.log(`[RTC] Connecting to ${userName}`);
             makePeer(u.socketId, true, userName);
           } else {
-            // Already connected, we might need new tracks
             makePeer(u.socketId, true, u.userName);
           }
         }
       });
     }, 400);
-
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camStream, screenStream, socket]);
 
-  // Handle new users
+  // FIX 2: Always re-offer to new peers regardless of stream state
   useEffect(() => {
-    if (!socket || (!camStream && !screenStream)) return;
-    const currentPeers = Object.keys(peersRef.current);
+    if (!socket) return;
     (sessionUsers || []).forEach(u => {
-      if (u.socketId && u.socketId !== socket.id && !currentPeers.includes(u.socketId)) {
-        console.log(`[RTC] Auto-connecting to new guest: ${u.userName}`);
-        makePeer(u.socketId, true, u.userName);
+      if (!u.socketId || u.socketId === socket.id) return;
+      const pc = peersRef.current[u.socketId];
+      const state = pc?.iceConnectionState;
+      const isGood = state === "connected" || state === "completed";
+      if ((camStream || screenStream) && !isGood) {
+        console.log(`[RTC] Re-offering to ${u.userName} (state: ${state || "none"})`);
+        setTimeout(() => makePeer(u.socketId, true, u.userName), 300);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionUsers, socket]);
+  }, [sessionUsers]);
 
-  // ── Signaling callbacks ──
   useEffect(() => {
     if (!socket) return;
 
@@ -727,7 +698,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
         const target = (usersRef.current || []).find(u => u.userId === userId);
         if (target && !peersRef.current[target.socketId]) {
           console.log(`[RTC] Establishing link with ${userName}...`);
-          // If we have music/stream, initiate
           if (camRef.current || screenRef.current) {
             makePeer(target.socketId, true, userName);
           }
@@ -749,7 +719,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
 
-  // Controls
   const toggleCam = async () => {
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
@@ -783,7 +752,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     }
   };
 
-  // Local stream attachment
   useEffect(() => {
     if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream;
   }, [camStream]);
@@ -791,7 +759,6 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream;
   }, [screenStream]);
 
-  // Cleanup
   useEffect(() => {
     return () => { Object.values(peersRef.current).forEach(p => p.close()); peersRef.current = {}; };
   }, []);
@@ -838,27 +805,37 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
         ))}
       </div>
 
+      {/* FIX 3: Helpful empty state with camera prompt */}
       {total === 0 && (
-        <div className="flex-1 flex flex-col items-center justify-center text-center py-10 opacity-40">
-          <Video className="text-gray-400 mb-3" style={{ width: 40, height: 40 }} />
-          <p className="text-sm font-bold text-gray-500">Live study room is active</p>
-          <p className="text-xs text-gray-600">Start your camera to see others</p>
+        <div className="flex-1 flex flex-col items-center justify-center text-center py-10 gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.07] flex items-center justify-center">
+            <Video className="text-gray-600" style={{ width: 28, height: 28 }} />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-gray-400 mb-1">No active streams</p>
+            <p className="text-xs text-gray-600 max-w-xs mx-auto mb-4">
+              {Object.keys(activeSharers).length > 0
+                ? `${Object.values(activeSharers)[0]?.name || "Someone"} has their camera on — start yours to connect!`
+                : "Start your camera to begin a live session with your group."}
+            </p>
+            <button onClick={toggleCam}
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-sky-500/20 flex items-center gap-2 mx-auto">
+              <Camera style={{ width: 14, height: 14 }} /> Start Camera
+            </button>
+          </div>
         </div>
       )}
 
       <div className="mt-auto p-4 rounded-xl border border-sky-500/15 bg-sky-500/[0.04] text-center">
         <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
           Connected via Peer-to-Peer WebRTC. High quality video depends on your network stability.
+          {isMobileDevice() && <span className="block mt-1 text-amber-400">📱 Screen sharing requires a desktop browser.</span>}
         </p>
       </div>
     </div>
   );
 }
 
-
-/* ══════════════════════════════════════════════════════════════════
-   MUSIC PANEL
-══════════════════════════════════════════════════════════════════ */
 const GENRES = [
   { id:"lofi",label:"Lo-Fi",emoji:"🎵",tag:"lofi"},{id:"jazz",label:"Jazz",emoji:"🎷",tag:"jazz"},
   {id:"classical",label:"Classical",emoji:"🎻",tag:"classical"},{id:"electronic",label:"Electronic",emoji:"⚡",tag:"electronic"},
@@ -913,9 +890,6 @@ function MusicPanel() {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   GROUP CHAT
-══════════════════════════════════════════════════════════════════ */
 function ChatPanel({ socket, sessionId, groupId, session }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -938,14 +912,10 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   useEffect(() => {
     fetchMessages();
     if (!socket) return;
-
-    // Join the group room so we receive group-chat events
     const joinGroup = () => socket.emit("join-group", groupId);
     if (socket.connected) joinGroup();
     socket.on("connect", joinGroup);
-
     const onGroupChat = (msg) => {
-      // Deduplicate — don't add if we already have this message (optimistic add)
       if (seenIds.current.has(msg._id)) return;
       seenIds.current.add(msg._id);
       setMessages(prev => [...prev, msg]);
@@ -959,14 +929,11 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
     };
   }, [fetchMessages, socket, groupId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   const send = async () => {
     if (!input.trim() || sending) return;
     const text = input.trim();
-    // Optimistic add — show message immediately (WhatsApp-style)
     const optimisticMsg = {
       _id: "opt_" + Date.now(),
       sender: { _id: session?.user?.id, name: session?.user?.name || "You" },
@@ -987,13 +954,8 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
         const data = await res.json();
         const msg = data.message;
         seenIds.current.add(msg._id);
-        // Replace optimistic message with real one
         setMessages(prev => prev.map(m => m._id === optimisticMsg._id ? msg : m));
-        // Emit via socket so OTHER users in the group room receive it in real-time
-        // (globalThis.__io doesn't work in Next.js 16 API route workers)
-        if (socket) {
-          socket.emit("group-chat", { groupId, message: msg });
-        }
+        if (socket) socket.emit("group-chat", { groupId, message: msg });
       }
     } catch {}
     finally { setSending(false); }
@@ -1036,52 +998,15 @@ function ChatPanel({ socket, sessionId, groupId, session }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   AI TUTOR PANEL
-   Tabs: Intro · Roadmap · Mastery Q&A · Resources · Flashcards
-   Single API call, token-efficient prompt
-══════════════════════════════════════════════════════════════════ */
-
-/* ── Resource link builder — real Google/YouTube/MDN/W3S search URLs ── */
 function buildResourceLinks(topic) {
   const q = encodeURIComponent(topic);
   return [
-    {
-      title: `Search "${topic}" on Google`,
-      url:   `https://www.google.com/search?q=${q}+tutorial`,
-      type:  "search", icon: "🔍",
-      desc:  "Google search results for tutorials and guides",
-    },
-    {
-      title: `YouTube: ${topic} tutorials`,
-      url:   `https://www.youtube.com/results?search_query=${q}+tutorial+for+beginners`,
-      type:  "video", icon: "▶",
-      desc:  "Free video tutorials on YouTube",
-    },
-    {
-      title: `MDN Web Docs — ${topic}`,
-      url:   `https://developer.mozilla.org/en-US/search?q=${q}`,
-      type:  "docs", icon: "📄",
-      desc:  "Official MDN documentation and references",
-    },
-    {
-      title: `W3Schools — ${topic}`,
-      url:   `https://www.w3schools.com/search/search_result.php?search=${q}`,
-      type:  "practice", icon: "💻",
-      desc:  "Interactive exercises and examples",
-    },
-    {
-      title: `GeeksForGeeks — ${topic}`,
-      url:   `https://www.geeksforgeeks.org/search/?q=${q}`,
-      type:  "article", icon: "📰",
-      desc:  "Articles, explanations and interview questions",
-    },
-    {
-      title: `Stack Overflow — ${topic}`,
-      url:   `https://stackoverflow.com/search?q=${q}`,
-      type:  "community", icon: "💬",
-      desc:  "Community Q&A and real-world problem solutions",
-    },
+    { title: `Search "${topic}" on Google`, url: `https://www.google.com/search?q=${q}+tutorial`, type: "search", icon: "🔍", desc: "Google search results for tutorials and guides" },
+    { title: `YouTube: ${topic} tutorials`, url: `https://www.youtube.com/results?search_query=${q}+tutorial+for+beginners`, type: "video", icon: "▶", desc: "Free video tutorials on YouTube" },
+    { title: `MDN Web Docs — ${topic}`, url: `https://developer.mozilla.org/en-US/search?q=${q}`, type: "docs", icon: "📄", desc: "Official MDN documentation and references" },
+    { title: `W3Schools — ${topic}`, url: `https://www.w3schools.com/search/search_result.php?search=${q}`, type: "practice", icon: "💻", desc: "Interactive exercises and examples" },
+    { title: `GeeksForGeeks — ${topic}`, url: `https://www.geeksforgeeks.org/search/?q=${q}`, type: "article", icon: "📰", desc: "Articles, explanations and interview questions" },
+    { title: `Stack Overflow — ${topic}`, url: `https://stackoverflow.com/search?q=${q}`, type: "community", icon: "💬", desc: "Community Q&A and real-world problem solutions" },
   ];
 }
 
@@ -1094,40 +1019,22 @@ const RESOURCE_CHIP = {
   community: "bg-violet-500/10 text-violet-400 border-violet-500/20",
 };
 
-/* ── Mastery Q&A — expandable important questions ── */
 function MasteryQA({ questions }) {
   const [open, setOpen] = useState(null);
   return (
     <div className="space-y-2">
       {questions.map((item, i) => (
-        <div key={i}
-          className={`rounded-xl border transition-all duration-200 overflow-hidden ${
-            open === i ? "border-sky-500/30 bg-sky-500/[0.04]" : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]"
-          }`}>
-          {/* question row */}
-          <button
-            className="w-full flex items-start gap-3 p-4 text-left"
-            onClick={() => setOpen(open === i ? null : i)}
-          >
-            <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5 ${
-              open === i ? "bg-sky-500 text-white" : "bg-white/[0.06] text-gray-500"
-            }`}>{i + 1}</span>
+        <div key={i} className={`rounded-xl border transition-all duration-200 overflow-hidden ${open === i ? "border-sky-500/30 bg-sky-500/[0.04]" : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]"}`}>
+          <button className="w-full flex items-start gap-3 p-4 text-left" onClick={() => setOpen(open === i ? null : i)}>
+            <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black flex-shrink-0 mt-0.5 ${open === i ? "bg-sky-500 text-white" : "bg-white/[0.06] text-gray-500"}`}>{i + 1}</span>
             <p className="flex-1 text-sm font-semibold text-gray-200 leading-snug">{item.q}</p>
-            <ChevronRight
-              style={{ width: 14, height: 14 }}
-              className={`text-gray-600 flex-shrink-0 mt-0.5 transition-transform duration-200 ${open === i ? "rotate-90 text-sky-400" : ""}`}
-            />
+            <ChevronRight style={{ width: 14, height: 14 }} className={`text-gray-600 flex-shrink-0 mt-0.5 transition-transform duration-200 ${open === i ? "rotate-90 text-sky-400" : ""}`} />
           </button>
-          {/* answer */}
           {open === i && (
             <div className="px-4 pb-4 pt-0">
               <div className="ml-9 pl-3 border-l-2 border-sky-500/30">
                 <p className="text-sm text-gray-400 leading-relaxed">{item.a}</p>
-                {item.tip && (
-                  <p className="mt-2 text-xs text-amber-400 bg-amber-500/[0.07] border border-amber-500/20 rounded-lg px-3 py-2">
-                    💡 {item.tip}
-                  </p>
-                )}
+                {item.tip && <p className="mt-2 text-xs text-amber-400 bg-amber-500/[0.07] border border-amber-500/20 rounded-lg px-3 py-2">💡 {item.tip}</p>}
               </div>
             </div>
           )}
@@ -1137,26 +1044,20 @@ function MasteryQA({ questions }) {
   );
 }
 
-/* ── Flashcards ── */
 function FlashcardDeck({ cards }) {
-  const [idx,     setIdx]     = useState(0);
+  const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [known,   setKnown]   = useState(new Set());
-
-  const current  = cards[idx];
+  const [known, setKnown] = useState(new Set());
+  const current = cards[idx];
   const progress = Math.round((known.size / cards.length) * 100);
-
   const next = (markKnown) => {
     if (markKnown) setKnown(k => new Set([...k, idx]));
     setFlipped(false);
     setTimeout(() => setIdx(i => (i + 1) % cards.length), 150);
   };
-
   const restart = () => { setIdx(0); setFlipped(false); setKnown(new Set()); };
-
   return (
     <div className="flex flex-col items-center gap-5 h-full justify-center px-4">
-      {/* progress */}
       <div className="w-full max-w-md">
         <div className="flex items-center justify-between text-xs text-gray-600 mb-1.5">
           <span>{idx + 1} / {cards.length}</span>
@@ -1166,43 +1067,18 @@ function FlashcardDeck({ cards }) {
           <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
-
-      {/* card */}
-      <div
-        onClick={() => setFlipped(f => !f)}
-        className={`w-full max-w-md min-h-[200px] rounded-2xl border cursor-pointer transition-all duration-300 flex flex-col items-center justify-center p-8 text-center select-none ${
-          flipped
-            ? "border-sky-500/30 bg-gradient-to-br from-sky-500/10 to-indigo-500/10"
-            : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.15]"
-        }`}
-      >
-        <p className="text-[10px] font-bold uppercase tracking-widest mb-3 text-gray-600">
-          {flipped ? "Answer" : "Question — tap to reveal"}
-        </p>
-        <p className={`text-base font-bold leading-relaxed ${flipped ? "text-sky-200" : "text-gray-200"}`}>
-          {flipped ? current.back : current.front}
-        </p>
+      <div onClick={() => setFlipped(f => !f)} className={`w-full max-w-md min-h-[200px] rounded-2xl border cursor-pointer transition-all duration-300 flex flex-col items-center justify-center p-8 text-center select-none ${flipped ? "border-sky-500/30 bg-gradient-to-br from-sky-500/10 to-indigo-500/10" : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.15]"}`}>
+        <p className="text-[10px] font-bold uppercase tracking-widest mb-3 text-gray-600">{flipped ? "Answer" : "Question — tap to reveal"}</p>
+        <p className={`text-base font-bold leading-relaxed ${flipped ? "text-sky-200" : "text-gray-200"}`}>{flipped ? current.back : current.front}</p>
       </div>
-
-      {/* actions */}
       {flipped ? (
         <div className="flex gap-3 w-full max-w-md">
-          <button onClick={() => next(false)}
-            className="flex-1 py-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.07] text-rose-400 text-sm font-bold hover:bg-rose-500/15 transition">
-            Still Learning
-          </button>
-          <button onClick={() => next(true)}
-            className="flex-1 py-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-400 text-sm font-bold hover:bg-emerald-500/15 transition">
-            Got It ✓
-          </button>
+          <button onClick={() => next(false)} className="flex-1 py-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.07] text-rose-400 text-sm font-bold hover:bg-rose-500/15 transition">Still Learning</button>
+          <button onClick={() => next(true)} className="flex-1 py-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-400 text-sm font-bold hover:bg-emerald-500/15 transition">Got It ✓</button>
         </div>
       ) : (
-        <button onClick={() => setFlipped(true)}
-          className="px-8 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-sky-500/20">
-          Reveal Answer
-        </button>
+        <button onClick={() => setFlipped(true)} className="px-8 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-sky-500/20">Reveal Answer</button>
       )}
-
       {known.size === cards.length && (
         <div className="text-center space-y-2">
           <p className="text-emerald-400 font-bold text-sm">🎉 You know all cards!</p>
@@ -1213,10 +1089,9 @@ function FlashcardDeck({ cards }) {
   );
 }
 
-/* ── Roadmap step ── */
 function RoadmapStep({ step, index, total }) {
   const TYPE_COLORS = {
-    concept:  { dot: "bg-sky-500",     badge: "bg-sky-500/10 text-sky-400 border-sky-500/20"      },
+    concept:  { dot: "bg-sky-500",     badge: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
     practice: { dot: "bg-amber-500",   badge: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
     project:  { dot: "bg-emerald-500", badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
   };
@@ -1239,7 +1114,6 @@ function RoadmapStep({ step, index, total }) {
   );
 }
 
-/* ── Tutor prompt — single call, returns all 5 sections ── */
 const TUTOR_PROMPT = (topic) => `Expert AI tutor. Topic: "${topic}". Return ONLY valid JSON, no markdown:
 {
   "intro": "2-3 sentences: what it is and why it matters",
@@ -1251,11 +1125,11 @@ const TUTOR_PROMPT = (topic) => `Expert AI tutor. Topic: "${topic}". Return ONLY
 Rules: roadmap=6 steps, mastery=8 questions covering beginner to advanced, flashcards=8 cards with key terms, aiResources=3 additional specific resources with names. Be concise to save tokens.`;
 
 const TUTOR_TABS = [
-  { id: "intro",     label: "Intro",     icon: BookOpen   },
-  { id: "roadmap",   label: "Roadmap",   icon: Map        },
-  { id: "mastery",   label: "Mastery Q&A", icon: HelpCircle },
-  { id: "flashcards",label: "Flashcards",icon: Zap        },
-  { id: "resources", label: "Resources", icon: Link2      },
+  { id: "intro",      label: "Intro",       icon: BookOpen   },
+  { id: "roadmap",    label: "Roadmap",     icon: Map        },
+  { id: "mastery",    label: "Mastery Q&A", icon: HelpCircle },
+  { id: "flashcards", label: "Flashcards",  icon: Zap        },
+  { id: "resources",  label: "Resources",   icon: Link2      },
 ];
 
 function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
@@ -1270,33 +1144,19 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
   const isLockedByMe = aiLock && aiLock.userId === session?.user?.id;
 
   useEffect(() => {
-    if (syncedModule) {
-      setModule(syncedModule);
-      setTopic(syncedModule.topic || "");
-    }
+    if (syncedModule) { setModule(syncedModule); setTopic(syncedModule.topic || ""); }
   }, [syncedModule]);
 
   const generate = async () => {
     const t = topic.trim();
     if (!t) return;
-    // Acquire lock
-    if (isLockedByOther) {
-      toast.error(`\ud83d\udd12 AI Tutor is being used by ${aiLock.userName}`);
-      return;
-    }
-    if (socket && !isLockedByMe) {
-      socket.emit("feature-lock", { sessionId, feature: "ai", userId: session?.user?.id, userName: session?.user?.name });
-    }
+    if (isLockedByOther) { toast.error(`🔒 AI Tutor is being used by ${aiLock.userName}`); return; }
+    if (socket && !isLockedByMe) socket.emit("feature-lock", { sessionId, feature: "ai", userId: session?.user?.id, userName: session?.user?.name });
     setLoading(true); setError(""); setModule(null);
     try {
-      const res  = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: TUTOR_PROMPT(t) }),
-      });
+      const res  = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: TUTOR_PROMPT(t) }) });
       const data = await res.json();
-      const raw  = (data.reply || "").trim()
-        .replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/,"").trim();
+      const raw  = (data.reply || "").trim().replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/,"").trim();
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("Bad format");
       const parsed = JSON.parse(jsonMatch[0]);
@@ -1304,11 +1164,7 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
       parsed.topic = t;
       setModule(parsed);
       setActiveTab("intro");
-
-      if (socket) {
-        socket.emit("ai-tutor-sync", { sessionId, module: parsed });
-      }
-      // Release lock after output is produced
+      if (socket) socket.emit("ai-tutor-sync", { sessionId, module: parsed });
       if (socket) socket.emit("feature-unlock", { sessionId, feature: "ai", userId: session?.user?.id });
     } catch (err) {
       console.error("[TutorAI]", err);
@@ -1317,7 +1173,6 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
     } finally { setLoading(false); }
   };
 
-  /* ── Search screen ── */
   if (!module && !loading) return (
     <div className="flex flex-col items-center justify-center gap-8 h-full p-8">
       {isLockedByOther && (
@@ -1331,14 +1186,11 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
           <Brain className="text-sky-400" style={{ width: 32, height: 32 }} />
         </div>
         <h2 className="text-2xl font-black text-white" style={{ fontFamily: "'Syne', sans-serif" }}>AI Study Tutor</h2>
-        <p className="text-gray-500 text-sm leading-relaxed">
-          Enter any topic — get a full learning path with intro, roadmap, mastery Q&A, flashcards, and resources.
-        </p>
+        <p className="text-gray-500 text-sm leading-relaxed">Enter any topic — get a full learning path with intro, roadmap, mastery Q&A, flashcards, and resources.</p>
       </div>
       <div className="w-full max-w-lg space-y-3">
         <div className="flex gap-2">
-          <input value={topic} onChange={e => setTopic(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && generate()}
+          <input value={topic} onChange={e => setTopic(e.target.value)} onKeyDown={e => e.key === "Enter" && generate()}
             placeholder="e.g. React Hooks, Binary Trees, OS Scheduling..."
             className="flex-1 bg-white/[0.05] border border-white/[0.09] rounded-xl px-5 py-3.5 text-gray-200 placeholder-gray-600 text-sm focus:outline-none focus:ring-1 focus:ring-sky-500 transition" />
           <button onClick={generate} disabled={!topic.trim()}
@@ -1350,16 +1202,12 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
       </div>
       <div className="flex flex-wrap gap-2 justify-center max-w-lg">
         {["React Hooks","Binary Search","SQL Joins","OS Scheduling","Recursion","HTTP/HTTPS","Linked Lists","Async/Await"].map(ex => (
-          <button key={ex} onClick={() => setTopic(ex)}
-            className="px-3.5 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] text-gray-500 text-xs hover:text-gray-300 hover:border-sky-500/25 transition-all">
-            {ex}
-          </button>
+          <button key={ex} onClick={() => setTopic(ex)} className="px-3.5 py-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] text-gray-500 text-xs hover:text-gray-300 hover:border-sky-500/25 transition-all">{ex}</button>
         ))}
       </div>
     </div>
   );
 
-  /* ── Loading ── */
   if (loading) return (
     <div className="flex flex-col items-center justify-center gap-5 h-full">
       <div className="relative w-16 h-16">
@@ -1374,38 +1222,28 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
     </div>
   );
 
-  /* ── Module view ── */
   return (
     <div className="flex flex-col h-full">
-      {/* header */}
       <div className="px-5 pt-4 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between gap-3 mb-4">
           <div>
             <p className="text-[10px] text-gray-600 uppercase tracking-widest font-bold mb-0.5">AI Study Module</p>
             <h3 className="text-lg font-black text-white capitalize" style={{ fontFamily: "'Syne', sans-serif" }}>{topic}</h3>
           </div>
-          <button onClick={() => { setModule(null); setTopic(""); }}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition flex-shrink-0 mt-1">
+          <button onClick={() => { setModule(null); setTopic(""); }} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition flex-shrink-0 mt-1">
             <RefreshCw style={{ width: 12, height: 12 }} /> New Topic
           </button>
         </div>
-        {/* tabs — scrollable on small screens */}
         <div className="flex gap-1 bg-white/[0.03] border border-white/[0.06] rounded-xl p-1 overflow-x-auto">
           {TUTOR_TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setActiveTab(id)}
-              className={`flex-shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${
-                activeTab === id ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-md" : "text-gray-500 hover:text-gray-300"
-              }`}>
+              className={`flex-shrink-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === id ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-md" : "text-gray-500 hover:text-gray-300"}`}>
               <Icon style={{ width: 11, height: 11 }} />{label}
             </button>
           ))}
         </div>
       </div>
-
-      {/* content */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
-
-        {/* INTRO */}
         {activeTab === "intro" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.05] p-5">
@@ -1417,9 +1255,9 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
             </div>
             <div className="grid grid-cols-4 gap-2">
               {[
-                { label: "Steps",      value: module.roadmap?.length    || 0, color: "text-sky-400"     },
-                { label: "Questions",  value: module.mastery?.length    || 0, color: "text-indigo-400"  },
-                { label: "Flashcards", value: module.flashcards?.length || 0, color: "text-amber-400"   },
+                { label: "Steps",      value: module.roadmap?.length    || 0, color: "text-sky-400" },
+                { label: "Questions",  value: module.mastery?.length    || 0, color: "text-indigo-400" },
+                { label: "Flashcards", value: module.flashcards?.length || 0, color: "text-amber-400" },
                 { label: "Resources",  value: (module._realLinks?.length || 0) + (module.aiResources?.length || 0), color: "text-emerald-400" },
               ].map(({ label, value, color }) => (
                 <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-center">
@@ -1428,54 +1266,37 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
                 </div>
               ))}
             </div>
-            <button onClick={() => setActiveTab("roadmap")}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/[0.08] text-gray-400 text-sm font-semibold hover:bg-white/[0.04] hover:text-white transition">
+            <button onClick={() => setActiveTab("roadmap")} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/[0.08] text-gray-400 text-sm font-semibold hover:bg-white/[0.04] hover:text-white transition">
               View Learning Roadmap <ArrowRight style={{ width: 14, height: 14 }} />
             </button>
           </div>
         )}
-
-        {/* ROADMAP */}
         {activeTab === "roadmap" && (
           <div>
             <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Map style={{ width: 13, height: 13 }} className="text-sky-400" /> Learning Path
             </p>
-            {(module.roadmap || []).map((step, i) => (
-              <RoadmapStep key={i} step={step} index={i} total={module.roadmap.length} />
-            ))}
-            <button onClick={() => setActiveTab("mastery")}
-              className="w-full flex items-center justify-center gap-2 py-3 mt-2 rounded-xl border border-white/[0.08] text-gray-400 text-sm font-semibold hover:bg-white/[0.04] hover:text-white transition">
+            {(module.roadmap || []).map((step, i) => <RoadmapStep key={i} step={step} index={i} total={module.roadmap.length} />)}
+            <button onClick={() => setActiveTab("mastery")} className="w-full flex items-center justify-center gap-2 py-3 mt-2 rounded-xl border border-white/[0.08] text-gray-400 text-sm font-semibold hover:bg-white/[0.04] hover:text-white transition">
               Test Your Knowledge <ArrowRight style={{ width: 14, height: 14 }} />
             </button>
           </div>
         )}
-
-        {/* MASTERY Q&A */}
         {activeTab === "mastery" && (
           <div>
             <p className="text-xs font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <HelpCircle style={{ width: 13, height: 13 }} className="text-indigo-400" />
-              Must-Know Questions to Master {topic}
+              <HelpCircle style={{ width: 13, height: 13 }} className="text-indigo-400" /> Must-Know Questions to Master {topic}
             </p>
             <MasteryQA questions={module.mastery || []} />
           </div>
         )}
-
-        {/* FLASHCARDS */}
         {activeTab === "flashcards" && (
           <div className="h-full">
-            {(module.flashcards || []).length > 0
-              ? <FlashcardDeck cards={module.flashcards} />
-              : <p className="text-center text-gray-600 text-sm py-10">No flashcards generated.</p>
-            }
+            {(module.flashcards || []).length > 0 ? <FlashcardDeck cards={module.flashcards} /> : <p className="text-center text-gray-600 text-sm py-10">No flashcards generated.</p>}
           </div>
         )}
-
-        {/* RESOURCES */}
         {activeTab === "resources" && (
           <div className="space-y-4">
-            {/* Real auto-generated links */}
             <p className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
               <Link2 style={{ width: 13, height: 13 }} className="text-amber-400" /> Find Resources Online
             </p>
@@ -1483,9 +1304,7 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
               {(module._realLinks || []).map((res, i) => (
                 <a key={i} href={res.url} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-white/[0.07] bg-white/[0.02] hover:border-sky-500/25 hover:bg-white/[0.05] transition-all group">
-                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center text-base flex-shrink-0 ${RESOURCE_CHIP[res.type] || RESOURCE_CHIP.article}`}>
-                    {res.icon}
-                  </div>
+                  <div className={`w-9 h-9 rounded-xl border flex items-center justify-center text-base flex-shrink-0 ${RESOURCE_CHIP[res.type] || RESOURCE_CHIP.article}`}>{res.icon}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-white group-hover:text-sky-300 transition-colors truncate">{res.title}</p>
                     <p className="text-xs text-gray-600 mt-0.5 truncate">{res.desc}</p>
@@ -1494,8 +1313,6 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
                 </a>
               ))}
             </div>
-
-            {/* AI-suggested specific resources */}
             {module.aiResources?.length > 0 && (
               <>
                 <p className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2 mt-2">
@@ -1503,13 +1320,9 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
                 </p>
                 <div className="grid grid-cols-1 gap-2">
                   {module.aiResources.map((res, i) => (
-                    <a key={i}
-                      href={`https://www.google.com/search?q=${encodeURIComponent(res.title)}`}
-                      target="_blank" rel="noopener noreferrer"
+                    <a key={i} href={`https://www.google.com/search?q=${encodeURIComponent(res.title)}`} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-3 p-3.5 rounded-xl border border-indigo-500/15 bg-indigo-500/[0.04] hover:border-indigo-500/30 hover:bg-indigo-500/[0.07] transition-all group">
-                      <div className="w-9 h-9 rounded-xl border border-indigo-500/20 bg-indigo-500/10 flex items-center justify-center text-indigo-400 text-xs font-black flex-shrink-0">
-                        AI
-                      </div>
+                      <div className="w-9 h-9 rounded-xl border border-indigo-500/20 bg-indigo-500/10 flex items-center justify-center text-indigo-400 text-xs font-black flex-shrink-0">AI</div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors truncate">{res.title}</p>
                         <p className="text-xs text-gray-600 mt-0.5 truncate">{res.desc}</p>
@@ -1527,9 +1340,6 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
   );
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   MAIN STUDY ROOM
-══════════════════════════════════════════════════════════════════ */
 const TOOLS = [
   { id: "whiteboard", icon: PenLine,       label: "Whiteboard" },
   { id: "chat",       icon: MessageSquare, label: "Chat"       },
@@ -1544,59 +1354,39 @@ export default function StudyRoomPage() {
   const { groupId, sessionId }  = useParams();
   const { data: session }      = useSession();
   const router                 = useRouter();
-  const [activeTool,   setActiveTool]   = useState("whiteboard");
-  const [group,        setGroup]        = useState(null);
-  const [elapsedSecs,  setElapsedSecs]  = useState(0);
-  const [camStream,    setCamStream]    = useState(null);
-  const [screenStream, setScreenStream] = useState(null);
-  const [socket,       setSocket]       = useState(null);
-  const [activeSharers, setActiveSharers] = useState({});
-  const [sessionUsers, setSessionUsers] = useState([]);
-  const [permissionRequest, setPermissionRequest] = useState(null);
-  const [remoteModule, setRemoteModule] = useState(null);
-  const [remotePdf, setRemotePdf] = useState({ fileName: "", docText: "" });
+  const [activeTool,       setActiveTool]       = useState("whiteboard");
+  const [group,            setGroup]            = useState(null);
+  const [elapsedSecs,      setElapsedSecs]      = useState(0);
+  const [camStream,        setCamStream]        = useState(null);
+  const [screenStream,     setScreenStream]     = useState(null);
+  const [socket,           setSocket]           = useState(null);
+  const [activeSharers,    setActiveSharers]    = useState({});
+  const [sessionUsers,     setSessionUsers]     = useState([]);
+  const [permissionRequest,setPermissionRequest]= useState(null);
+  const [remoteModule,     setRemoteModule]     = useState(null);
+  const [remotePdf,        setRemotePdf]        = useState({ fileName: "", docText: "" });
   const [remotePdfContent, setRemotePdfContent] = useState(null);
-  const [featureLocks, setFeatureLocks] = useState({ ai: null, pdf: null });
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [featureLocks,     setFeatureLocks]     = useState({ ai: null, pdf: null });
+  const [mobileMenuOpen,   setMobileMenuOpen]   = useState(false);
 
   useEffect(() => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
-    const s = io(backendUrl, {
-      path: "/api/socketio",
-      transports: ["websocket", "polling"],
-    });
+    const s = io(backendUrl, { path: "/api/socketio", transports: ["websocket", "polling"] });
     setSocket(s);
 
     s.on("permission-request", ({ from, type }) => {
       setPermissionRequest({ from, type });
       toast.info(`📢 ${from.name} requested to use ${type}`, { autoClose: 10000 });
     });
-
     s.on("permission-response", ({ to, type, allowed }) => {
       if (to === session?.user?.id) {
-        if (allowed) {
-          toast.success(`✅ Permission granted for ${type}!`);
-          window.dispatchEvent(new CustomEvent("permission-granted", { detail: { type } }));
-        } else {
-          toast.error(`❌ Permission denied for ${type}.`);
-        }
+        if (allowed) { toast.success(`✅ Permission granted for ${type}!`); window.dispatchEvent(new CustomEvent("permission-granted", { detail: { type } })); }
+        else toast.error(`❌ Permission denied for ${type}.`);
       }
     });
-
-    s.on("ai-tutor-sync", (mod) => {
-      setRemoteModule(mod);
-      toast.info("🧠 AI Tutor module updated by sync!");
-    });
-
-    s.on("pdf-sync", (data) => {
-      setRemotePdf(data);
-      toast.info(`📄 PDF \"${data.fileName}\" synced!`);
-    });
-
-    s.on("pdf-content-sync", (data) => {
-      setRemotePdfContent(data);
-    });
-
+    s.on("ai-tutor-sync", (mod) => { setRemoteModule(mod); toast.info("🧠 AI Tutor module updated by sync!"); });
+    s.on("pdf-sync", (data) => { setRemotePdf(data); toast.info(`📄 PDF "${data.fileName}" synced!`); });
+    s.on("pdf-content-sync", (data) => { setRemotePdfContent(data); });
     s.on("media-status", ({ userId, userName, type, status }) => {
       setActiveSharers(prev => {
         const next = { ...prev };
@@ -1605,32 +1395,15 @@ export default function StudyRoomPage() {
         return next;
       });
     });
+    s.on("feature-lock-state", (locks) => { setFeatureLocks(locks); });
+    s.on("feature-lock-denied", ({ feature, lockedBy }) => { toast.error(`🔒 ${feature.toUpperCase()} is being used by ${lockedBy.userName}`); });
+    s.on("pomodoro-start", (state) => { setActiveTool("pomodoro"); toast.info("⏱️ Pomodoro session started! Redirecting...", { autoClose: 3000 }); });
+    s.on("session-users", (users) => { setSessionUsers(users); });
 
-    // Feature lock state (AI/PDF mutual exclusion)
-    s.on("feature-lock-state", (locks) => {
-      setFeatureLocks(locks);
-    });
-    s.on("feature-lock-denied", ({ feature, lockedBy }) => {
-      toast.error(`🔒 ${feature.toUpperCase()} is being used by ${lockedBy.userName}`);
-    });
-
-    // Pomodoro start — redirect ALL members to pomodoro tab
-    s.on("pomodoro-start", (state) => {
-      setActiveTool("pomodoro");
-      toast.info("⏱️ Pomodoro session started! Redirecting...", { autoClose: 3000 });
-    });
-
-    s.on("session-users", (users) => {
-      setSessionUsers(users);
-    });
-
-    return () => {
-      s.disconnect();
-    };
+    return () => { s.disconnect(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Join session + group rooms once socket AND session are both ready
   useEffect(() => {
     if (!socket || !session?.user?.id || !sessionId) return;
     socket.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
@@ -1639,34 +1412,20 @@ export default function StudyRoomPage() {
 
   const handleRequestPermission = (type) => {
     if (!socket || !session?.user) return;
-    socket.emit("permission-request", {
-      sessionId,
-      type,
-      from: { id: session.user.id, name: session.user.name }
-    });
+    socket.emit("permission-request", { sessionId, type, from: { id: session.user.id, name: session.user.name } });
     toast.info(`📤 Request sent to use ${type}...`);
   };
 
   const handlePermissionResponse = (allowed) => {
     if (!permissionRequest || !socket) return;
-    socket.emit("permission-response", {
-      sessionId,
-      to: permissionRequest.from.id,
-      type: permissionRequest.type,
-      allowed
-    });
+    socket.emit("permission-response", { sessionId, to: permissionRequest.from.id, type: permissionRequest.type, allowed });
     setPermissionRequest(null);
   };
 
   useEffect(() => {
     fetch(`/api/groups/${groupId}`).then(r=>r.json()).then(d=>setGroup(d.group));
-    // XP Increase on room join
     if (session?.user?.id) {
-      fetch("/api/streak/xp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 10, reason: "Joined study session" })
-      }).catch(e => console.error("XP Error:", e));
+      fetch("/api/streak/xp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount: 10, reason: "Joined study session" }) }).catch(() => {});
     }
   }, [groupId, session?.user?.id]);
 
@@ -1688,7 +1447,8 @@ export default function StudyRoomPage() {
     if (!lock) return null;
     const isMe = lock.userId === session?.user?.id;
     return (
-      <span className={`absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[7px] ring-2 ring-[#0b0f1a] ${isMe ? 'bg-emerald-500' : 'bg-amber-500'}`} title={isMe ? 'You are using this' : `${lock.userName} is using this`}>
+      <span className={`absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[7px] ring-2 ring-[#0b0f1a] ${isMe ? 'bg-emerald-500' : 'bg-amber-500'}`}
+        title={isMe ? 'You are using this' : `${lock.userName} is using this`}>
         <Lock style={{ width: 8, height: 8 }} />
       </span>
     );
@@ -1696,12 +1456,10 @@ export default function StudyRoomPage() {
 
   return (
     <div className="flex h-screen bg-[#060810] text-gray-100 overflow-hidden">
-      {/* ── Mobile hamburger ── */}
       <button onClick={() => setMobileMenuOpen(o => !o)} className="md:hidden fixed top-3 left-3 z-[60] w-10 h-10 rounded-xl bg-[#0b0f1a] border border-white/[0.08] flex items-center justify-center text-gray-400 hover:text-white transition-colors shadow-lg">
         <Menu style={{ width: 18, height: 18 }} />
       </button>
 
-      {/* ── Sidebar (hidden on mobile unless menu open) ── */}
       <aside className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform duration-300 fixed md:relative z-50 w-[68px] bg-[#0b0f1a] border-r border-white/[0.06] flex flex-col items-center py-4 gap-1.5 flex-shrink-0 h-full`}>
         <button onClick={() => router.push("/Home")} className="w-10 h-10 rounded-xl overflow-hidden mb-2 flex-shrink-0 hover:scale-105 transition-transform">
           <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
@@ -1717,27 +1475,23 @@ export default function StudyRoomPage() {
               }`}>
               <Icon style={{ width: 18, height: 18 }} />
               <span className="text-[8px] font-semibold tracking-wide">{label}</span>
-              {isActive && !featureKey && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#0b0f1a] animate-pulse" />
-              )}
+              {isActive && !featureKey && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#0b0f1a] animate-pulse" />}
               {featureKey && lockIndicator(featureKey)}
             </button>
           );
         })}
         <div className="flex-1" />
-        {/* Online users count */}
         <div className="text-[9px] text-gray-600 font-bold mb-1">{sessionUsers.length} online</div>
         <button onClick={() => router.push(`/groups/${groupId}`)} title="Leave Room"
           className="w-12 h-12 rounded-xl flex items-center justify-center text-gray-600 hover:bg-rose-500/10 hover:text-rose-400 transition-all">
           <X style={{ width: 18, height: 18 }} />
         </button>
       </aside>
-      {/* Mobile overlay */}
       {mobileMenuOpen && <div onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 bg-black/50 z-40 md:hidden" />}
 
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-12 bg-[#0b0f1a] border-b border-white/[0.06] px-3 md:px-5 flex items-center gap-2 md:gap-4 flex-shrink-0">
-          <div className="w-10 md:hidden" /> {/* spacer for hamburger */}
+          <div className="w-10 md:hidden" />
           <div className="flex items-center gap-2 min-w-0">
             <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse flex-shrink-0" />
             <span className="text-sm font-bold text-gray-200 truncate">{group?.name || "Study Room"}</span>
@@ -1764,15 +1518,10 @@ export default function StudyRoomPage() {
         </div>
       </main>
 
-      {/* Permission Request Modal */}
       <AnimatePresence>
         {permissionRequest && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed bottom-24 right-8 z-[100] w-80 p-5 rounded-2xl border border-sky-500/30 bg-[#0d1117] shadow-2xl shadow-sky-500/10"
-          >
+          <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed bottom-24 right-8 z-[100] w-80 p-5 rounded-2xl border border-sky-500/30 bg-[#0d1117] shadow-2xl shadow-sky-500/10">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-sky-500/10 flex items-center justify-center">
                 <ShieldCheck className="text-sky-400" size={20} />
@@ -1782,22 +1531,10 @@ export default function StudyRoomPage() {
                 <p className="text-sm font-bold text-white tracking-tight">{permissionRequest.from.name}</p>
               </div>
             </div>
-            <p className="text-xs text-gray-400 mb-6 leading-relaxed">
-              Wants permission to use the <b>{permissionRequest.type}</b> feature. Grant access?
-            </p>
+            <p className="text-xs text-gray-400 mb-6 leading-relaxed">Wants permission to use the <b>{permissionRequest.type}</b> feature. Grant access?</p>
             <div className="flex gap-2">
-              <button
-                onClick={() => handlePermissionResponse(false)}
-                className="flex-1 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 text-xs font-bold hover:text-white hover:bg-white/[0.06] transition-all"
-              >
-                Deny
-              </button>
-              <button
-                onClick={() => handlePermissionResponse(true)}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-xs font-bold shadow-lg shadow-sky-500/20 px-4"
-              >
-                Allow Access
-              </button>
+              <button onClick={() => handlePermissionResponse(false)} className="flex-1 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 text-xs font-bold hover:text-white hover:bg-white/[0.06] transition-all">Deny</button>
+              <button onClick={() => handlePermissionResponse(true)} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 text-white text-xs font-bold shadow-lg shadow-sky-500/20 px-4">Allow Access</button>
             </div>
           </motion.div>
         )}
