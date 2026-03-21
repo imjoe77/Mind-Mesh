@@ -484,7 +484,7 @@ export default function DiscoverPage() {
         <div className="flex gap-1 bg-white/[0.03] border border-white/[0.07] rounded-2xl p-1.5 mb-8 max-w-md">
           {TABS.map(({ id, label, icon: Icon, badge }) => (
             <button key={id}
-              onClick={() => { setTab(id); if (id !== "discover") fetchConnections(); if (id === "connections") fetchUnread(); }}
+              onClick={() => { setTab(id); if (id !== "discover") fetchConnections(); }}
               className={`relative flex-1 flex items-center justify-center gap-1.5 text-xs py-2.5 rounded-xl font-semibold transition-all duration-200 ${
                 tab === id
                   ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20"
