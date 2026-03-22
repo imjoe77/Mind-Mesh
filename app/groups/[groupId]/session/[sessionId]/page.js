@@ -1525,6 +1525,20 @@ export default function StudyRoomPage() {
   const [remotePdfContent, setRemotePdfContent] = useState(null);
   const [featureLocks, setFeatureLocks] = useState({ ai: null, pdf: null });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Tracks which tool tabs have unseen new output (notification dot)
+  const [newActivity, setNewActivity] = useState(new Set());
+
+  const markActivity = useCallback((toolId) => {
+    setNewActivity(prev => { const n = new Set(prev); n.add(toolId); return n; });
+  }, []);
+  const clearActivity = useCallback((toolId) => {
+    setNewActivity(prev => { const n = new Set(prev); n.delete(toolId); return n; });
+  }, []);
+  const handleToolClick = useCallback((toolId) => {
+    setActiveTool(toolId);
+    clearActivity(toolId);
+    setMobileMenuOpen(false);
+  }, [clearActivity]);
 
   useEffect(() => {
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
@@ -1552,16 +1566,22 @@ export default function StudyRoomPage() {
 
     s.on("ai-tutor-sync", (mod) => {
       setRemoteModule(mod);
-      toast.info("🧠 AI Tutor module updated by sync!");
+      // Mark quiz tab as having new activity (only if not currently viewing it)
+      setActiveTool(cur => { if (cur !== "quiz") setNewActivity(prev => { const n = new Set(prev); n.add("quiz"); return n; }); return cur; });
     });
 
     s.on("pdf-sync", (data) => {
       setRemotePdf(data);
-      toast.info(`📄 PDF \"${data.fileName}\" synced!`);
+      setActiveTool(cur => { if (cur !== "pdf") setNewActivity(prev => { const n = new Set(prev); n.add("pdf"); return n; }); return cur; });
     });
 
     s.on("pdf-content-sync", (data) => {
       setRemotePdfContent(data);
+      setActiveTool(cur => { if (cur !== "pdf") setNewActivity(prev => { const n = new Set(prev); n.add("pdf"); return n; }); return cur; });
+    });
+
+    s.on("group-chat", () => {
+      setActiveTool(cur => { if (cur !== "chat") setNewActivity(prev => { const n = new Set(prev); n.add("chat"); return n; }); return cur; });
     });
 
     s.on("media-status", ({ userId, userName, type, status }) => {
@@ -1571,6 +1591,10 @@ export default function StudyRoomPage() {
         else if (next[type]?.userId === userId) delete next[type];
         return next;
       });
+      // Dot on media tab when someone starts sharing
+      if (status === "on") {
+        setActiveTool(cur => { if (cur !== "media") setNewActivity(prev => { const n = new Set(prev); n.add("media"); return n; }); return cur; });
+      }
     });
 
     // Feature lock state (AI/PDF mutual exclusion)
@@ -1581,9 +1605,10 @@ export default function StudyRoomPage() {
       toast.error(`🔒 ${feature.toUpperCase()} is being used by ${lockedBy.userName}`);
     });
 
-    // Pomodoro start — redirect ALL members to pomodoro tab
-    s.on("pomodoro-start", (state) => {
+    // Pomodoro start — mark tab + redirect ALL members
+    s.on("pomodoro-start", () => {
       setActiveTool("pomodoro");
+      setNewActivity(prev => { const n = new Set(prev); n.delete("pomodoro"); return n; });
       toast.info("⏱️ Pomodoro session started! Redirecting...", { autoClose: 3000 });
     });
 
@@ -1675,17 +1700,18 @@ export default function StudyRoomPage() {
         </button>
         <div className="w-8 h-px bg-white/[0.06] mb-1" />
         {TOOLS.map(({ id, icon: Icon, label }) => {
-          const isActive = activeSharers[id] || (id === "pdf" && remotePdf.docText) || (id === "quiz" && remoteModule);
           const featureKey = id === "quiz" ? "ai" : id === "pdf" ? "pdf" : null;
+          const hasNewActivity = newActivity.has(id);
           return (
-            <button key={id} onClick={() => { setActiveTool(id); setMobileMenuOpen(false); }} title={label}
+            <button key={id} onClick={() => handleToolClick(id)} title={label}
               className={`relative w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all ${
                 activeTool === id ? "bg-gradient-to-br from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20" : "text-gray-600 hover:bg-white/[0.06] hover:text-gray-300"
               }`}>
               <Icon style={{ width: 18, height: 18 }} />
               <span className="text-[8px] font-semibold tracking-wide">{label}</span>
-              {isActive && !featureKey && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-[#0b0f1a] animate-pulse" />
+              {/* Notification dot — new unseen output from this feature */}
+              {hasNewActivity && activeTool !== id && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-[#0b0f1a] animate-pulse" />
               )}
               {featureKey && lockIndicator(featureKey)}
             </button>
