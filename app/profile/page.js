@@ -48,9 +48,11 @@ function GradeBadge({ grade, large = false }) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   CGPA CALCULATOR
+   INTELLIGENCE INDEX CALCULATOR (MindMesh Custom Mapping)
+   Note: This differs from the university SGPA as it uses 
+   discrete platform-wide grade mapping.
 ══════════════════════════════════════════════════════════ */
-function computeCGPA(subjects) {
+function computeMindMeshIndex(subjects) {
   if (!subjects?.length) return null;
   const graded = subjects.filter(s => {
     const g = getGrade(s.percent);
@@ -84,9 +86,8 @@ function SubjectRow({ subject, index }) {
 
       <div className="w-28 hidden sm:block">
         <div className="h-1.5 bg-[#eff0f3] rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-700"
+          <div className={`h-full rounded-full transition-all duration-700 ${!subject.color ? gm.bar : ""}`}
             style={{ width: `${pct}%`, background: subject.color || undefined }}
-            className={!subject.color ? gm.bar : undefined}
           />
         </div>
       </div>
@@ -279,9 +280,9 @@ export default function ProfilePage() {
   );
 
   // results is the full metrics object: { subjects:[{name,percent,color}], gpa, semester }
-  const subjects     = results?.subjects || [];
-  const cgpa         = computeCGPA(subjects);
-  const overallGrade = cgpa ? getGrade(Math.round((Number(cgpa) / 10) * 100)) : null;
+  const subjects      = results?.subjects || [];
+  const mindMeshIndex = computeMindMeshIndex(subjects);
+  const overallGrade  = mindMeshIndex ? getGrade(Math.round((Number(mindMeshIndex) / 10) * 100)) : null;
 
   return (
     <div className="min-h-screen bg-[#eef0f4]">
@@ -309,16 +310,16 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* CGPA */}
-            {cgpa && (
+            {/* Intelligence Index */}
+            {mindMeshIndex && (
               <div className="text-center">
                 <div className={`text-4xl font-black ${overallGrade ? GRADE_META[overallGrade]?.color : "text-gray-700"}`}>
-                  {cgpa}
+                  {mindMeshIndex}
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5">CGPA (10 point)</p>
+                <p className="text-xs text-indigo-500 font-black mt-0.5 uppercase tracking-tighter">MindMesh Index</p>
                 {overallGrade && (
-                  <span className={`text-xs font-bold ${GRADE_META[overallGrade]?.color}`}>
-                    Grade {overallGrade} · {GRADE_META[overallGrade]?.label}
+                  <span className={`text-[10px] font-bold ${GRADE_META[overallGrade]?.color}`}>
+                    Ranking: {GRADE_META[overallGrade]?.label}
                   </span>
                 )}
               </div>
@@ -329,11 +330,11 @@ export default function ProfilePage() {
         {/* grade legend */}
         <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-5">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Grading Scale</p>
-          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             {Object.entries(GRADE_META).map(([g, m]) => (
               <div key={g} className={`rounded-xl border p-2 text-center ${m.bg} ${m.border}`}>
                 <div className={`text-sm font-black ${m.color}`}>{g}</div>
-                <div className="text-[9px] text-gray-500 mt-0.5 leading-tight">{m.label}</div>
+                <div className="text-[9px] text-gray-400 mt-0.5 leading-tight">{m.label}</div>
               </div>
             ))}
           </div>
@@ -448,15 +449,15 @@ export default function ProfilePage() {
 
                 {/* overall summary */}
                 <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-5 text-center space-y-2">
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Overall Performance</p>
-                  {cgpa && overallGrade ? (
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Platform Intelligence</p>
+                  {mindMeshIndex && overallGrade ? (
                     <>
                       <GradeBadge grade={overallGrade} large />
-                      <div className={`text-3xl font-black ${GRADE_META[overallGrade]?.color}`}>{cgpa}</div>
-                      <p className="text-xs text-gray-500">CGPA · {GRADE_META[overallGrade]?.label}</p>
+                      <div className={`text-3xl font-black ${GRADE_META[overallGrade]?.color}`}>{mindMeshIndex}</div>
+                      <p className="text-[10px] text-gray-500 font-bold uppercase">Index Score</p>
                     </>
                   ) : (
-                    <p className="text-sm text-gray-400 py-4">Upload marks card to see CGPA</p>
+                    <p className="text-sm text-gray-400 py-4">Upload marks card to see Index</p>
                   )}
                 </div>
               </>
@@ -466,7 +467,7 @@ export default function ProfilePage() {
               <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-8 text-center">
                 <GraduationCap className="mx-auto text-gray-300 mb-3" style={{ width: 36, height: 36 }} />
                 <p className="text-sm font-semibold text-gray-500 mb-1">No Academic Data Yet</p>
-                <p className="text-xs text-gray-400">Upload your marks card to see detailed insights, CGPA, and grade distribution.</p>
+                <p className="text-xs text-gray-400">Upload your marks card to see detailed insights, Index score, and grade distribution.</p>
               </div>
             )}
           </div>
