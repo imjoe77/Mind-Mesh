@@ -747,9 +747,9 @@ MindMesh was built during a hackathon by a team of passionate developers:
 <table>
   <tr>
     <td align="center"><strong>Joel</strong><br/>Full-Stack Developer</td>
-    <td align="center"><strong>Abhijith</strong><br/>Developer</td>
-    <td align="center"><strong>Ansar</strong><br/>Developer</td>
-    <td align="center"><strong>Nikhil</strong><br/>Developer</td>
+    <td align="center"><strong>Abhijith</strong><br/>Overall Guide</td>
+    <td align="center"><strong>Ansar</strong><br/>Frontend Developer-1</td>
+    <td align="center"><strong>Nikhil</strong><br/>Frontend Developer-2 + Tester</td>
   </tr>
 </table>
 
