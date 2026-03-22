@@ -79,10 +79,13 @@ YOU MUST USE THE FOLLOWING ACTION TAGS WHEN RELEVANT:
    Supported Paths: /Home, /About, /SDash, /groups, /discover, /profile.
    Example: "Sure! Let's go to your profile. [NAVIGATE:/profile]"
 
-2. CREATE GROUP: To create a study group, append "[CREATE_GROUP:{"name": "...", "subject": "...", "description": "...", "date": "...", "startTime": "...", "endTime": "..."}]".
-   Only name and subject are REQUIRED. If other details aren't provided, I will use defaults.
-   Example: "Great idea! I'll create a Math Study group for you. [CREATE_GROUP:{"name": "Math Hub", "subject": "Mathematics"}]"
-   Example with all: "Okay! Creating your group. [CREATE_GROUP:{"name": "Finals Prep", "subject": "Science", "description": "Review for exam.", "date": "2024-12-01", "startTime": "10:00", "endTime": "12:00"}]"
+2. CREATE GROUP: To create a study group, append "[CREATE_GROUP:{...}]" at the end of your message.
+   Only name and subject are REQUIRED. If other details aren't provided, use defaults.
+   PRIVATE GROUPS: If the user mentions "private", "pin", "passcode", or gives a 4-6 digit number, set "isPrivate": true and put the PIN in "passcode".
+   If the user provides no pin but asked for private, ask them for a 4-6 digit PIN before creating.
+   Fields: name (required), subject (required), description, date (YYYY-MM-DD), startTime (HH:MM), endTime (HH:MM), isPrivate (boolean, default false), passcode (4-6 digit string, required if isPrivate true).
+   Example public: "[CREATE_GROUP:{\"name\": \"Math Hub\", \"subject\": \"Mathematics\", \"isPrivate\": false}]"
+   Example private with pin 1234: "[CREATE_GROUP:{\"name\": \"Finals Prep\", \"subject\": \"Science\", \"isPrivate\": true, \"passcode\": \"1234\"}]"
 
 Be friendly, proactive, and always try to guide the user using navigation tags if they seem lost.`;
 
@@ -136,19 +139,32 @@ Be friendly, proactive, and always try to guide the user using navigation tags i
              const defaultStartTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
              const defaultEndTime = new Date(now.getTime() + 2 * 60 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
-             const newG = await Group.create({
-               name: g.name, 
-               subject: g.subject, 
-               description: g.description || `Study group for ${g.subject}`,
-               owner: session.user.id,
-               members: [session.user.id],
-               sessions: [{ 
-                 date: new Date(g.date || Date.now()), 
-                 startTime: g.startTime || defaultStartTime, 
-                 endTime: g.endTime || defaultEndTime 
-               }]
-             });
-             reply = `Successfully created your study group "${g.name}"! I'm taking you there now. 🚀 [NAVIGATE:/groups/${newG._id}]`;
+             // Validate PIN strictly if private (must be 4-6 digits)
+             const isPrivate = !!g.isPrivate;
+             const rawPin = String(g.passcode || "").trim().replace(/\D/g, "");
+             const validPin = /^\d{4,6}$/.test(rawPin) ? rawPin : null;
+
+             if (isPrivate && !validPin) {
+               // PIN missing or invalid — ask user before creating
+               reply = `I'd love to create a private room! Please give me a PIN that's strictly 4–6 digits (e.g. 1234 or 998871) and I'll set it up right away. 🔒`;
+             } else {
+               const newG = await Group.create({
+                 name: g.name,
+                 subject: g.subject,
+                 description: g.description || `Study group for ${g.subject}`,
+                 owner: session.user.id,
+                 members: [session.user.id],
+                 isPrivate: isPrivate,
+                 passcode: isPrivate ? validPin : null,
+                 sessions: [{
+                   date: new Date(g.date || Date.now()),
+                   startTime: g.startTime || defaultStartTime,
+                   endTime: g.endTime || defaultEndTime
+                 }]
+               });
+               const privacy = isPrivate ? `🔒 private (PIN: ${validPin})` : "🌐 public";
+               reply = `Done! Created your ${privacy} study group **"${g.name}"**! Taking you there now. 🚀 [NAVIGATE:/groups/${newG._id}]`;
+             }
           }
         }
       } catch (e) { 
