@@ -76,7 +76,7 @@ MindMesh addresses these challenges through:
 | **AI Tutor Module** | Generate AI-powered study modules with topic explanations, roadmaps, key concepts, and quiz questions |
 | **Group Chat** | Real-time in-room messaging via Socket.IO |
 | **Feature Locking** | Concurrent access control — only one user can operate AI/PDF tools at a time, preventing conflicts |
-| **Session Scheduling** | Schedule future sessions with automatic activation and email/push notifications |
+| **Session Scheduling** | Schedule future sessions with automatic activation and real-time push notifications |
 
 ### 🔍 Discover & Connect
 
@@ -138,7 +138,7 @@ MindMesh addresses these challenges through:
 | **Socket.IO 4.8** | Real-time bidirectional communication |
 | **Mongoose 9.3** | MongoDB ODM for data modeling |
 | **NextAuth.js 4** | Authentication (Google & GitHub OAuth) |
-| **Nodemailer** | Email notifications for session activations |
+| **NextAuth.js 4** | Authentication (Google & GitHub OAuth) |
 | **pdf-parse / pdfreader** | Server-side PDF text extraction |
 
 ### AI / ML
@@ -280,7 +280,6 @@ mindmesh/
 │   │   └── groupController.js  # Group operation helpers
 │   │
 │   ├── lib/                    # Utility libraries
-│   │   └── email.js            # Nodemailer email service
 │   │
 │   ├── Home/page.js            # Landing page
 │   ├── About/page.js           # About page
@@ -658,13 +657,6 @@ GITHUB_SECRET=<your-github-client-secret>
 # ── AI (OpenRouter) ──
 OPENROUTER_API_KEY=<your-openrouter-api-key>
 
-# ── Email (Nodemailer) ──
-EMAIL_SERVER_HOST=smtp.gmail.com
-EMAIL_SERVER_PORT=587
-EMAIL_SERVER_USER=<your-email>
-EMAIL_SERVER_PASSWORD=<your-app-password>
-EMAIL_FROM=MindMesh <noreply@mindmesh.app>
-
 # ── Public URL ──
 NEXT_PUBLIC_URL=http://localhost:3000
 NEXT_PUBLIC_BACKEND_URL=http://localhost:3000
@@ -680,7 +672,6 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:3000
 | `GITHUB_ID` | ✅ | GitHub OAuth app client ID |
 | `GITHUB_SECRET` | ✅ | GitHub OAuth app client secret |
 | `OPENROUTER_API_KEY` | ✅ | OpenRouter API key for AI features |
-| `EMAIL_SERVER_*` | ⚠️ | Required for email notifications (graceful fallback if not set) |
 | `NEXT_PUBLIC_URL` | ✅ | Public-facing URL of the application |
 | `NEXT_PUBLIC_BACKEND_URL` | ✅ | Backend URL (same as public URL in single-server setup) |
 
@@ -746,10 +737,10 @@ MindMesh was built during a hackathon by a team of passionate developers:
 
 <table>
   <tr>
-    <td align="center"><strong>Joel</strong><br/>Full-Stack Developer</td>
-    <td align="center"><strong>Abhijith</strong><br/>Overall Guide</td>
-    <td align="center"><strong>Ansar</strong><br/>Frontend Developer-1</td>
-    <td align="center"><strong>Nikhil</strong><br/>Frontend Developer-2 + Tester</td>
+    <td align="center"><strong>Joel</strong><br/>Full-Stack Developer + Planning</td>
+    <td align="center"><strong>Abhijith</strong><br/>Research + Tester</td>
+    <td align="center"><strong>Ansar</strong><br/>Frontend Developer + Designer</td>
+    <td align="center"><strong>Nikhil</strong><br/>Frontend Developer 2 + Presentation</td>
   </tr>
 </table>
 
