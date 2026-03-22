@@ -256,6 +256,31 @@ function MarksCard({ onExtracted }) {
     const overall  = getGrade(avg);
     const ogm      = GRADE_META[overall];
 
+    // ── Smart Insights (non-obvious) ──
+    const sorted   = [...subjects].sort((a, b) => a.percent - b.percent);
+    const weakest  = sorted[0];
+    const strongest= sorted[sorted.length - 1];
+    const spread   = strongest.percent - weakest.percent;
+    const above80  = subjects.filter(s => s.percent >= 80).length;
+    const below60  = subjects.filter(s => s.percent < 60).length;
+
+    const insights = [];
+    if (spread >= 20)
+      insights.push(`📊 ${spread}% spread between best & worst — your performance is uneven. Focus on ${weakest.name} to boost your overall GPA.`);
+    else
+      insights.push(`📊 Only ${spread}% spread across all subjects — you have a consistent performance profile.`);
+
+    if (above80 >= subjects.length * 0.5)
+      insights.push(`🔥 ${above80} of ${subjects.length} subjects are above 80% — you're performing well in the majority of your coursework.`);
+    else if (below60 > 0)
+      insights.push(`⚠️ ${below60} subject${below60 > 1 ? "s are" : " is"} below 60% — at risk of failing. Prioritise these before others.`);
+
+    if (strongest && weakest && strongest.percent !== weakest.percent)
+      insights.push(`💡 ${strongest.name} is your strongest subject at ${strongest.percent}% — use this strength as motivation when studying ${weakest.name}.`);
+
+    // ── Grading Scale legend (top) ──
+    const hasRealGpa = metrics.gpa && metrics.gpa !== "N/A" && metrics.gpa !== "null";
+
     return (
       <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-5 space-y-4">
 
@@ -269,18 +294,46 @@ function MarksCard({ onExtracted }) {
               <h3 className="text-sm font-black text-gray-900">Intelligence Extraction</h3>
               <p className="text-[10px] text-gray-400">
                 {metrics.semester || "Current Semester"} · {subjects.length} subjects
-                {metrics.gpa && metrics.gpa !== "N/A" ? ` · GPA ${metrics.gpa}` : ""}
                 {fallback && " · ⚠ AI fallback data"}
               </p>
             </div>
           </div>
+          {/* GPA exactly as on the card */}
           <div className="text-right">
-            <div className={`text-2xl font-black ${ogm.color}`}>{overall}</div>
-            <div className="text-[10px] text-gray-400">{avg}% avg</div>
+            {hasRealGpa ? (
+              <>
+                <div className="text-2xl font-black text-sky-600">{metrics.gpa}</div>
+                <div className="text-[10px] text-gray-400">SGPA / CGPA</div>
+              </>
+            ) : (
+              <>
+                <div className={`text-2xl font-black ${ogm.color}`}>{overall}</div>
+                <div className="text-[10px] text-gray-400">{avg}% avg</div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Subject rows — AI returns {name, percent} we derive grade */}
+        {/* Grading scale mini legend */}
+        <div className="grid grid-cols-8 gap-1">
+          {["S","A","B","C","D","F","X","NE"].map(g => {
+            const gm = GRADE_META[g];
+            return (
+              <div key={g} className={`rounded-lg border py-1 text-center ${gm.bg}`}>
+                <div className={`text-[10px] font-black ${gm.color}`}>{g}</div>
+                <div className="text-[8px] text-gray-500 leading-tight">{gm.label}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Subject Results label */}
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Subject Results</p>
+          <p className="text-[10px] text-gray-500">{subjects.length} subjects</p>
+        </div>
+
+        {/* Subject rows — show grade as-is, progress bar from percent */}
         <div className="space-y-2.5">
           {subjects.map((sub, i) => {
             const grade = getGrade(sub.percent);
@@ -307,6 +360,14 @@ function MarksCard({ onExtracted }) {
           })}
         </div>
 
+        {/* Smart Insights */}
+        <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-3 space-y-1.5">
+          <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest mb-2">💡 Smart Insights</p>
+          {insights.slice(0, 3).map((ins, i) => (
+            <p key={i} className="text-[11px] text-gray-700 leading-relaxed">{ins}</p>
+          ))}
+        </div>
+
         {/* Overall summary strip */}
         <div className={`rounded-xl border p-3 flex items-center justify-between ${ogm.bg}`}>
           <div>
@@ -314,12 +375,21 @@ function MarksCard({ onExtracted }) {
             <p className="text-[10px] text-gray-500 mt-0.5">
               {subjects.filter(s => getGrade(s.percent) === "F" || getGrade(s.percent) === "X").length > 0
                 ? `⚠ ${subjects.filter(s => ["F","X"].includes(getGrade(s.percent))).length} subject(s) need attention`
-                : "✓ All subjects cleared"}
+                : "✓ All subjects cleared — great work!"}
             </p>
           </div>
           <div className="text-right">
-            <div className={`text-xl font-black ${ogm.color}`}>{overall}</div>
-            <div className="text-[10px] text-gray-400">{ogm.label}</div>
+            {hasRealGpa ? (
+              <>
+                <div className="text-xl font-black text-sky-600">{metrics.gpa}</div>
+                <div className="text-[10px] text-gray-400">SGPA · {overall} grade</div>
+              </>
+            ) : (
+              <>
+                <div className={`text-xl font-black ${ogm.color}`}>{overall}</div>
+                <div className="text-[10px] text-gray-400">{ogm.label}</div>
+              </>
+            )}
           </div>
         </div>
 
