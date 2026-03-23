@@ -530,22 +530,8 @@ const ICE_CFG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    // Free TURN servers for better NAT traversal
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -553,58 +539,20 @@ const ICE_CFG = {
 // Robust helper component for individual remote streams to ensure srcObject attachment
 function RemoteVideo({ sid, stream, userName }) {
   const videoRef = useRef(null);
-  const [isActive, setIsActive] = useState(true);
-
   useEffect(() => {
-    const videoEl = videoRef.current;
-    if (!videoEl || !stream) return;
-    
-    // Always re-attach stream
-    videoEl.srcObject = stream;
-    console.log(`[RTC] Stream attached for ${userName} (${sid}), tracks: ${stream.getTracks().length}`);
-    
-    // Force play
-    const tryPlay = () => {
-      videoEl.play().catch(() => {});
-    };
-    tryPlay();
-
-    // Listen for track ended/muted events
-    const tracks = stream.getTracks();
-    const onEnded = () => {
-      const activeTracks = stream.getTracks().filter(t => t.readyState === 'live');
-      setIsActive(activeTracks.length > 0);
-    };
-    tracks.forEach(t => {
-      t.addEventListener('ended', onEnded);
-      t.addEventListener('mute', onEnded);
-      t.addEventListener('unmute', () => { setIsActive(true); tryPlay(); });
-    });
-
-    // Periodic check — ensure video is actually playing
-    const playCheck = setInterval(() => {
-      if (videoEl.paused && stream.active) tryPlay();
-    }, 3000);
-
-    return () => {
-      clearInterval(playCheck);
-      tracks.forEach(t => {
-        t.removeEventListener('ended', onEnded);
-        t.removeEventListener('mute', onEnded);
-      });
-    };
+    if (videoRef.current && stream) {
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+        console.log(`[RTC] Stream attached for ${userName} (${sid})`);
+      }
+    }
   }, [stream, sid, userName]);
 
   return (
     <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
       <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-      {!isActive && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <p className="text-xs text-gray-400 font-semibold">Stream paused</p>
-        </div>
-      )}
       <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1 group-hover:bg-black/80 transition-all border border-white/[0.05]">
-        <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         {userName}
       </div>
     </div>
@@ -652,21 +600,17 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       peersRef.current[targetSocketId] = pc;
     }
 
-    // Attach ALL current local tracks using REFS to avoid stale closures
-    const currentCam = camRef.current;
-    const currentScreen = screenRef.current;
-    if (currentCam) {
-      currentCam.getTracks().forEach(track => {
-        if (track.readyState !== 'live') return;
+    // Attach ALL current local tracks (Audio + Video)
+    if (camStream) {
+      camStream.getTracks().forEach(track => {
         const alreadyAdded = pc.getSenders().find(s => s.track === track);
-        if (!alreadyAdded) { try { pc.addTrack(track, currentCam); } catch (e) {}}
+        if (!alreadyAdded) { try { pc.addTrack(track, camStream); } catch (e) {}}
       });
     }
-    if (currentScreen) {
-      currentScreen.getTracks().forEach(track => {
-        if (track.readyState !== 'live') return;
+    if (screenStream) {
+      screenStream.getTracks().forEach(track => {
         const alreadyAdded = pc.getSenders().find(s => s.track === track);
-        if (!alreadyAdded) { try { pc.addTrack(track, currentScreen); } catch (e) {}}
+        if (!alreadyAdded) { try { pc.addTrack(track, screenStream); } catch (e) {}}
       });
     }
 
@@ -700,47 +644,11 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     };
 
     pc.oniceconnectionstatechange = () => {
-      const state = pc.iceConnectionState;
-      console.log(`[RTC] Peer ${targetSocketId} ICE state: ${state}`);
-      
-      if (state === "disconnected") {
-        // Wait a bit — disconnected often recovers on its own
-        setTimeout(() => {
-          if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
-            console.log(`[RTC] Peer ${targetSocketId} still disconnected, attempting ICE restart`);
-            try {
-              // Try ICE restart instead of full teardown
-              pc.createOffer({ iceRestart: true, offerToReceiveAudio: true, offerToReceiveVideo: true })
-                .then(offer => pc.setLocalDescription(offer))
-                .then(() => {
-                  socketRef.current?.emit("webrtc-offer", {
-                    sessionId, to: targetSocketId, offer: pc.localDescription,
-                    fromUserId: sessionRef.current?.user?.id, fromUserName: sessionRef.current?.user?.name
-                  });
-                }).catch(e => console.error("[RTC] ICE restart failed:", e));
-            } catch (e) {
-              console.error("[RTC] ICE restart error:", e);
-            }
-          }
-        }, 3000);
-      }
-      
-      if (state === "failed" || state === "closed") {
-        console.log(`[RTC] Peer ${targetSocketId} connection ${state} — cleaning up`);
+      if (["failed", "closed"].includes(pc.iceConnectionState)) {
+        console.log(`[RTC] Peer ${targetSocketId} connection state: ${pc.iceConnectionState}`);
         pc.close();
         delete peersRef.current[targetSocketId];
         setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
-        
-        // Auto-reconnect after a short delay if we still have media
-        if (state === "failed" && (camRef.current || screenRef.current)) {
-          setTimeout(() => {
-            const userStillPresent = usersRef.current?.find(u => u.socketId === targetSocketId);
-            if (userStillPresent) {
-              console.log(`[RTC] Auto-reconnecting to ${targetSocketId}`);
-              makePeer(targetSocketId, true, userStillPresent.userName);
-            }
-          }, 2000);
-        }
       }
     };
 
@@ -823,23 +731,7 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     };
 
     const timer = setTimeout(syncAll, 600);
-    
-    // Periodic health check — re-sync any broken connections
-    const healthCheck = setInterval(() => {
-      Object.entries(peersRef.current).forEach(([sid, pc]) => {
-        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
-          console.log(`[RTC] Health check: cleaning stale peer ${sid}`);
-          pc.close();
-          delete peersRef.current[sid];
-          setRemoteStreams(prev => { const n = { ...prev }; delete n[sid]; return n; });
-        }
-      });
-    }, 8000);
-    
-    return () => {
-      clearTimeout(timer);
-      clearInterval(healthCheck);
-    };
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camStream, screenStream, socket, sessionUsers, activeSharers]);
 
