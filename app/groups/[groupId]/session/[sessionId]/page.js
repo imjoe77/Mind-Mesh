@@ -359,10 +359,14 @@ ${text.slice(0, 5000)}`;
       const raw  = (data.reply || "").replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/,"").trim();
       const match = raw.match(/\{[\s\S]*\}/);
       if (match) {
-        const parsed = JSON.parse(match[0]);
-        setKeyPoints(parsed);
-        // Sync key points to all users
-        if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints: parsed, messages: [] });
+        try {
+          const parsed = JSON.parse(match[0]);
+          setKeyPoints(parsed);
+          // Sync key points to all users
+          if (socket) socket.emit("pdf-content-sync", { sessionId, keyPoints: parsed, messages: [] });
+        } catch (e) {
+          console.error("[PDF_AUTOEXTRACT] JSON parse error on:", match[0]);
+        }
       }
     } catch (e) { console.error("[PDF_AUTOEXTRACT]", e); }
   };
@@ -1207,7 +1211,8 @@ function RoadmapStep({ step, index, total }) {
 }
 
 /* ── Tutor prompt — single call, returns all 5 sections ── */
-const TUTOR_PROMPT = (topic) => `Expert AI tutor. Topic: "${topic}". Return ONLY valid JSON, no markdown:
+const TUTOR_PROMPT = (topic) => `Expert AI tutor. Topic: "${topic}". Return ONLY valid JSON, no markdown or leading/trailing text.
+CRITICAL: You MUST ensure the JSON is perfectly valid and all strings are correctly escaped.
 {
   "intro": "2-3 sentences: what it is and why it matters",
   "roadmap": [{"step":1,"title":"","desc":"one sentence","duration":"","type":"concept|practice|project"}],
@@ -1215,7 +1220,7 @@ const TUTOR_PROMPT = (topic) => `Expert AI tutor. Topic: "${topic}". Return ONLY
   "flashcards": [{"front":"Term or concept","back":"Definition or explanation"}],
   "aiResources": [{"title":"","desc":"one line"}]
 }
-Rules: roadmap=6 steps, mastery=8 questions covering beginner to advanced, flashcards=8 cards with key terms, aiResources=3 additional specific resources with names. Be concise to save tokens.`;
+Rules: roadmap=6 steps, mastery=8 questions covering beginner to advanced, flashcards=8 cards with key terms, aiResources=3 additional specific resources with names. Be concise to save tokens but ensure valid formatting.`;
 
 const TUTOR_TABS = [
   { id: "intro",     label: "Intro",     icon: BookOpen   },
@@ -1262,18 +1267,26 @@ function QuizPanel({ socket, sessionId, syncedModule, featureLocks, session }) {
         body: JSON.stringify({ message: TUTOR_PROMPT(t) }),
       });
       const data = await res.json();
-      const raw  = (data.reply || "").trim()
+      let raw  = (data.reply || "").trim()
         .replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/,"").trim();
+      
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Bad format");
-      const parsed = JSON.parse(jsonMatch[0]);
-      parsed._realLinks = buildResourceLinks(t);
-      parsed.topic = t;
-      setModule(parsed);
-      setActiveTab("intro");
-
-      if (socket) {
-        socket.emit("ai-tutor-sync", { sessionId, module: parsed });
+      if (!jsonMatch) {
+          console.error("[TutorAI] API Raw Reply (no JSON found):", raw);
+          throw new Error("Bad format");
+      }
+      
+      let jsonString = jsonMatch[0];
+      try {
+        const parsed = JSON.parse(jsonString);
+        parsed._realLinks = buildResourceLinks(t);
+        parsed.topic = t;
+        setModule(parsed);
+        setActiveTab("intro");
+        if (socket) socket.emit("ai-tutor-sync", { sessionId, module: parsed });
+      } catch (e) {
+        console.error("[TutorAI] JSON Parsing Error on:", jsonString);
+        throw e;
       }
       // Release lock after output is produced
       if (socket) socket.emit("feature-unlock", { sessionId, feature: "ai", userId: session?.user?.id });
