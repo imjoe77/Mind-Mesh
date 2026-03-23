@@ -74,34 +74,24 @@ Current Time: ${new Date().toLocaleString()}
 ${pageContext}
 ${userContext}
 
-IMPORTANT RULES:
-- Keep responses SHORT (1-3 sentences max)
-- NEVER say you created a group unless you include the [CREATE_GROUP:{...}] tag
-- NEVER describe group creation unless you actually use the tag
-- If user asks to create a group but hasn't given enough info, ASK for the missing details
+YOU MUST USE THE FOLLOWING ACTION TAGS WHEN RELEVANT:
+1. NAVIGATION: To move the user to a specific page, append "[NAVIGATE:path]" at the end of your message. 
+   Supported Paths: /Home, /About, /SDash, /groups, /discover, /profile.
+   Example: "Sure! Let's go to your profile. [NAVIGATE:/profile]"
 
-ACTION TAGS (you MUST use these to perform actions):
+2. CREATE GROUP: To create a study group, append "[CREATE_GROUP:{...}]" at the end of your message.
+   Only name and subject are REQUIRED. If other details aren't provided, use defaults.
+   PRIVATE GROUPS: If the user mentions "private", "pin", "passcode", or gives a 4-6 digit number, set "isPrivate": true and put the PIN in "passcode".
+   If the user provides no pin but asked for private, ask them for a 4-6 digit PIN before creating.
+   Fields: name (required), subject (required), description, date (YYYY-MM-DD), startTime (HH:MM), endTime (HH:MM), isPrivate (boolean, default false), passcode (4-6 digit string, required if isPrivate true).
+   Example public: "[CREATE_GROUP:{\"name\": \"Math Hub\", \"subject\": \"Mathematics\", \"isPrivate\": false}]"
+   Example private with pin 1234: "[CREATE_GROUP:{\"name\": \"Finals Prep\", \"subject\": \"Science\", \"isPrivate\": true, \"passcode\": \"1234\"}]"
 
-1. NAVIGATION: Append "[NAVIGATE:path]" to move the user to a page.
-   Paths: /Home, /About, /SDash, /groups, /discover, /profile
-   Example: "Let's go! [NAVIGATE:/profile]"
-
-2. CREATE GROUP: Append "[CREATE_GROUP:{...}]" with valid JSON to create a group.
-   REQUIRED: name, subject
-   OPTIONAL: description, maxMembers (number, default 20), date (YYYY-MM-DD), startTime (HH:MM), endTime (HH:MM), isPrivate (boolean), passcode (4-6 digit string)
-   
-   CRITICAL: If user specifies a member count/size/limit (e.g. "for 5 people"), set maxMembers to EXACTLY that number.
-   CRITICAL: If user wants private, they MUST provide a 4-6 digit PIN. If they haven't, ASK for it first.
-   CRITICAL: You MUST include the [CREATE_GROUP:...] tag for the group to actually be created. Without it, nothing happens.
-   
-   Example: "Creating it now! [CREATE_GROUP:{"name":"Math Hub","subject":"Mathematics","maxMembers":5}]"
-   Private example: "Done! [CREATE_GROUP:{"name":"Finals Prep","subject":"Science","isPrivate":true,"passcode":"1234","maxMembers":5}]"
-
-Do NOT hallucinate or pretend actions happened. Only confirm an action if you used the correct tag.`;
+Be friendly, proactive, and always try to guide the user using navigation tags if they seem lost.`;
 
       messages = [
         { role: "system", content: systemPrompt },
-        ...(history?.slice(-6) || []),
+        ...(history?.slice(-8) || []),
         { role: "user", content: message }
       ];
     }
@@ -124,8 +114,8 @@ Do NOT hallucinate or pretend actions happened. Only confirm an action if you us
       },
       body: JSON.stringify({
         model,
-        max_tokens: 800,
-        temperature: isMittar ? 0.15 : 0.4, // very low for Mittar to reduce hallucination
+        max_tokens: 2500,
+        temperature: 0.4,
         messages
       })
     });
@@ -138,26 +128,12 @@ Do NOT hallucinate or pretend actions happened. Only confirm an action if you us
     const data = await response.json();
     let reply = data?.choices?.[0]?.message?.content || "No response.";
 
-    // ── Auto-Actions (Mittar group creation) ──
+    // ── Auto-Actions (Llama only usually) ──
     if (isMittar && reply.includes("[CREATE_GROUP:")) {
       try {
-        // More robust JSON extraction — handle both greedy and non-greedy patterns
-        let jsonStr = null;
-        // Try non-greedy first (most common)
-        const match1 = reply.match(/\[CREATE_GROUP:(\{.*?\})\]/s);
-        if (match1?.[1]) {
-          jsonStr = match1[1];
-        } else {
-          // Try greedy for nested braces
-          const match2 = reply.match(/\[CREATE_GROUP:(\{[^\]]*\})\]/s);
-          if (match2?.[1]) jsonStr = match2[1];
-        }
-
-        if (jsonStr) {
-          // Fix common LLM JSON issues: single quotes, trailing commas
-          jsonStr = jsonStr.replace(/'/g, '"').replace(/,\s*}/g, '}');
-          const g = JSON.parse(jsonStr);
-          
+        const jsonMatch = reply.match(/\[CREATE_GROUP:(.*?)\]/s);
+        if (jsonMatch?.[1]) {
+          const g = JSON.parse(jsonMatch[1]);
           if (g.name && g.subject) {
              const now = new Date();
              const defaultStartTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -167,13 +143,6 @@ Do NOT hallucinate or pretend actions happened. Only confirm an action if you us
              const isPrivate = !!g.isPrivate;
              const rawPin = String(g.passcode || "").trim().replace(/\D/g, "");
              const validPin = /^\d{4,6}$/.test(rawPin) ? rawPin : null;
-
-             // Parse maxMembers — respect user's requested count, clamp to valid range
-             let maxMembers = 20; // default
-             if (g.maxMembers) {
-               const parsed = parseInt(g.maxMembers, 10);
-               if (!isNaN(parsed) && parsed >= 2 && parsed <= 100) maxMembers = parsed;
-             }
 
              if (isPrivate && !validPin) {
                // PIN missing or invalid — ask user before creating
@@ -185,7 +154,6 @@ Do NOT hallucinate or pretend actions happened. Only confirm an action if you us
                  description: g.description || `Study group for ${g.subject}`,
                  owner: session.user.id,
                  members: [session.user.id],
-                 maxMembers: maxMembers,
                  isPrivate: isPrivate,
                  passcode: isPrivate ? validPin : null,
                  sessions: [{
@@ -195,21 +163,13 @@ Do NOT hallucinate or pretend actions happened. Only confirm an action if you us
                  }]
                });
                const privacy = isPrivate ? `🔒 private (PIN: ${validPin})` : "🌐 public";
-               reply = `Done! Created your ${privacy} study group **"${g.name}"** (max ${maxMembers} members). Taking you there now. 🚀 [NAVIGATE:/groups/${newG._id}]`;
+               reply = `Done! Created your ${privacy} study group **"${g.name}"**! Taking you there now. 🚀 [NAVIGATE:/groups/${newG._id}]`;
              }
-          } else {
-            // Name or subject missing — ask user
-            reply = `I need at least a group name and subject to create a group. Could you specify those? For example: "Create a group called Physics Club for Physics"`;
           }
-        } else {
-          console.warn("[Mittar] CREATE_GROUP tag found but JSON extraction failed. Raw:", reply.slice(0, 200));
-          reply = reply.replace(/\[CREATE_GROUP:.*?\]/gs, "").trim();
-          reply += "\n\nI had trouble creating the group. Could you try again with something like: \"Create a group called [name] for [subject]\"?";
         }
       } catch (e) { 
         console.error("Mittar Group Creation Error:", e);
-        reply = reply.replace(/\[CREATE_GROUP:.*?\]/gs, "").trim();
-        reply += "\n\nI tried creating the group but ran into an issue. Please try again with clearer details like: \"Create a group called Math Study for Mathematics with 5 members\".";
+        reply += "\n\n(I tried to create the group but encountered an error. Please try again with more details!)";
       }
     }
 
