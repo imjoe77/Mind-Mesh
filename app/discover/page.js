@@ -66,7 +66,7 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
 
   return (
     <motion.div
-      className="absolute inset-x-0 mx-auto w-full max-w-[400px] h-full"
+      className="absolute inset-x-0 mx-auto w-full h-full"
       style={{
         x: isTop ? x : 0,
         rotate: isTop ? rotate : 0,
@@ -528,9 +528,9 @@ export default function DiscoverPage() {
             {/* Card Stack */}
             <div className="flex flex-col items-center gap-6 w-full lg:w-auto">
               {loading ? (
-                <div className="w-full max-w-[400px] h-[620px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                <div className="w-full max-w-[450px] h-[580px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
               ) : !currentUser ? (
-                <div className="w-full max-w-[400px] h-[620px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
+                <div className="w-full max-w-[450px] h-[580px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
                   <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
                     <Zap className="text-gray-600" style={{ width: 28, height: 28 }} />
                   </div>
@@ -547,7 +547,7 @@ export default function DiscoverPage() {
               ) : (
                 <>
                   {/* card stack */}
-                  <div className="relative w-full max-w-[400px] h-[620px]">
+                  <div className="relative w-full max-w-[450px] h-[580px]">
                     {[...visibleStack].reverse().map((user, revIdx) => {
                       const idx = visibleStack.length - 1 - revIdx;
                       return (
