@@ -7,7 +7,7 @@ import Link from "next/link";
 import { motion, useInView, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Calendar, MessageSquare, Users,
-  Clock, Trash2, LogOut, Crown, Send, Tag, Radio,
+  Clock, Trash2, LogOut, Crown, Send, Tag, Radio, Lock,
 } from "lucide-react";
 import { toast } from "react-toastify";
 
@@ -78,9 +78,20 @@ export default function GroupDetailPage() {
 
   const handleJoin = async () => {
     if (!session) return router.push("/Login");
+    
+    let providedPasscode = null;
+    if (group?.isPrivate) {
+      providedPasscode = prompt("This room is private. Enter numeric passcode to join:");
+      if (providedPasscode === null) return; // user cancelled
+    }
+
     setJoining(true);
     try {
-      const res = await fetch(`/api/groups/${groupId}/join`, { method: "POST" });
+      const res = await fetch(`/api/groups/${groupId}/join`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: providedPasscode }) 
+      });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed to join"); }
       await fetchGroup();
       toast.success("Joined group successfully!");
@@ -247,6 +258,12 @@ export default function GroupDetailPage() {
                     }}>
                     {group.subject}
                   </span>
+
+                  {group.isPrivate && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest self-start">
+                      <Lock style={{ width: 10, height: 10 }} /> Private Room
+                    </div>
+                  )}
 
                   <h1 className="text-2xl font-black text-white leading-snug tracking-tight"
                     style={{ fontFamily: "'Syne', sans-serif" }}>
@@ -426,6 +443,12 @@ export default function GroupDetailPage() {
                       const now          = new Date();
                       const sessionStart = new Date(`${dateStr}T${s.startTime}:00`);
                       const sessionEnd   = new Date(`${dateStr}T${s.endTime}:00`);
+                      
+                      // Handle slots that cross midnight (e.g. 23:00 -> 01:00)
+                      if (sessionEnd < sessionStart) {
+                        sessionEnd.setDate(sessionEnd.getDate() + 1);
+                      }
+                      
                       const isPast       = sessionEnd < now;
                       const isInProgress = now >= sessionStart && now <= sessionEnd;
                       const dbStatus     = s.status || "scheduled";
