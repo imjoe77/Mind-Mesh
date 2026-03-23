@@ -66,7 +66,7 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
 
   return (
     <motion.div
-      className="absolute inset-0"
+      className="absolute inset-x-0 mx-auto w-full max-w-[400px] h-full"
       style={{
         x: isTop ? x : 0,
         rotate: isTop ? rotate : 0,
