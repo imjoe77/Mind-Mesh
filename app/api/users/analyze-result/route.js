@@ -280,13 +280,11 @@ CRITICAL RULES:
           headers: {
             "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
-            "X-Title": "MindMesh Academic Analyzer",
           },
           body: JSON.stringify({
-            model: modelId,
+            model: "google/gemini-pro-1.5", // highly reliable vision model
             max_tokens: 3000,
-            temperature: 0.02,
+            temperature: 0.1,
             messages: [
               {
                 role: "user",
@@ -310,15 +308,15 @@ CRITICAL RULES:
     let usedFallback = false;
 
     try {
-      // Primary attempt: Gemini Flash
-      openRouterRes = await callAI("google/gemini-flash-1.5");
+      // Primary attempt: Use the 11B Vision model (very reliable on most plans)
+      openRouterRes = await callAI("meta-llama/llama-3.2-11b-vision-instruct");
       
       if (!openRouterRes.ok) {
         const errData = await openRouterRes.clone().json().catch(() => ({}));
         console.warn(`[ANALYZE] Primary model failed (${openRouterRes.status}):`, errData);
         
-        // Fallback: Llama 3.2 90B Vision (Very reliable on OpenRouter)
-        console.log(`[ANALYZE] Falling back to Llama 3.2 90B Vision...`);
+        // Fallback: Llama 3.2 90B Vision
+        console.log(`[ANALYZE] Falling back to 90B Vision...`);
         usedFallback = true;
         openRouterRes = await callAI("meta-llama/llama-3.2-90b-vision-instruct");
       }
