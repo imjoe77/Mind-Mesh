@@ -268,61 +268,77 @@ CRITICAL RULES:
 8. Double-check: count the subject rows in the image and make sure your subjects array has the same count
 9. If this is NOT a valid academic document, return: {"subjects": [], "error": "Not a valid marks card"}`;
 
-    console.log(`[ANALYZE] Sending to OpenRouter (Gemini Flash) — image size: ${(base64Image.length / 1024).toFixed(0)}KB`);
+    console.log(`[ANALYZE] Attempting extraction with primary model (Gemini Flash)...`);
 
-    const controller = new AbortController();
-    const timeout    = setTimeout(() => controller.abort(), 45000); // longer timeout for Gemini
+    const callAI = async (modelId) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      try {
+        const res = await fetch(OPENROUTER_API_URL, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
+            "X-Title": "MindMesh Academic Analyzer",
+          },
+          body: JSON.stringify({
+            model: modelId,
+            max_tokens: 3000,
+            temperature: 0.02,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  { type: "image_url", image_url: { url: base64Image } },
+                ],
+              },
+            ],
+          }),
+        });
+        clearTimeout(timeout);
+        return res;
+      } catch (err) {
+        clearTimeout(timeout);
+        throw err;
+      }
+    };
 
     let openRouterRes;
+    let usedFallback = false;
+
     try {
-      openRouterRes = await fetch(OPENROUTER_API_URL, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
-          "X-Title": "MindMesh Academic Analyzer",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-flash-1.5",
-          max_tokens: 3000, // enough for 15+ subjects
-          temperature: 0.02, // near-deterministic
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: base64Image } },
-              ],
-            },
-          ],
-        }),
-      });
+      // Primary attempt: Gemini Flash
+      openRouterRes = await callAI("google/gemini-flash-1.5");
+      
+      if (!openRouterRes.ok) {
+        const errData = await openRouterRes.clone().json().catch(() => ({}));
+        console.warn(`[ANALYZE] Primary model failed (${openRouterRes.status}):`, errData);
+        
+        // Fallback: Llama 3.2 90B Vision (Very reliable on OpenRouter)
+        console.log(`[ANALYZE] Falling back to Llama 3.2 90B Vision...`);
+        usedFallback = true;
+        openRouterRes = await callAI("meta-llama/llama-3.2-90b-vision-instruct");
+      }
     } catch (fetchErr) {
-      clearTimeout(timeout);
       if (fetchErr.name === "AbortError") {
-        console.warn("[ANALYZE] Timed out after 45s");
-        return NextResponse.json(
-          { error: "Analysis timed out. The AI is busy — please try again in a moment." },
-          { status: 504 }
-        );
+        return NextResponse.json({ error: "Analysis timed out. Try again." }, { status: 504 });
       }
       throw fetchErr;
     }
-    clearTimeout(timeout);
 
     if (!openRouterRes.ok) {
       const errText = await openRouterRes.text();
-      console.error("[ANALYZE] OpenRouter error:", openRouterRes.status, errText);
       return NextResponse.json(
-        { error: `AI service error (${openRouterRes.status}). Check your OPENROUTER_API_KEY or try again.` },
+        { error: `AI service error (${openRouterRes.status}). Please check your connection or try again.` },
         { status: 502 }
       );
     }
 
-    const data        = await openRouterRes.json();
-    let   aiResponse  = data.choices?.[0]?.message?.content?.trim() || "";
+    const data = await openRouterRes.json();
+    let aiResponse = data.choices?.[0]?.message?.content?.trim() || "";
 
     console.log(`[ANALYZE] Raw AI response (${aiResponse.length} chars):`, aiResponse.slice(0, 500));
 
