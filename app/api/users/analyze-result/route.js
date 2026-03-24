@@ -6,104 +6,152 @@ import User from "@/app/models/User";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-/* ──────────────────────────────────────────────────────────
-   KLE Tech / Indian University Grade → Percent mapping
-   
-   KLE uses 10-point grade system:
-   O=10(95%), A=9(85%), B=8(75%), C=7(65%), D=6(55%), P=5(52%), F=0(35%)
-   
-   MindMesh grading: S:90+ A:80-89 B:70-79 C:60-69 D:50-59 F:<50
-────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────
+   GRADE MAPPINGS
+   KLE Tech: O=10(95%) A=9(85%) B=8(75%) C=7(65%) D=6(55%) P=5(52%) F=0
+   MindMesh display: S≥90 A≥80 B≥70 C≥60 D≥50 F<50
+───────────────────────────────────────────────────────────────── */
 
-// KLE 10-point grade point → percent
 const GRADE_POINT_TO_PERCENT = {
-  10: 95, 9: 85, 8: 75, 7: 65, 6: 55, 5: 52, 4: 50, 0: 35,
+  10: 95, 9: 85, 8: 75, 7: 65, 6: 55, 5: 52, 4: 48, 3: 40, 2: 35, 1: 33, 0: 0,
 };
 
-// Letter grade → percent (covers KLE, VTU, Anna, Mumbai, etc.)
 const LETTER_GRADE_MAP = {
-  // KLE / common Indian
-  "O": 95,    // Outstanding (10 point)
-  "A+": 90,   // Exceptional
-  "A": 85,    // Excellent (9 point at KLE)
-  "B+": 78,   // Very Good
-  "B": 75,    // Good (8 point at KLE)
-  "C+": 68,
-  "C": 65,    // Average (7 point at KLE)
-  "D+": 58,
-  "D": 55,    // Below Average (6 point at KLE)
-  "P": 52,    // Pass (5 point at KLE)
-  "E": 52,    // Pass equivalent
-  "S": 93,    // Some universities use S for Outstanding
-  "F": 35,    "FAIL": 35, "AB": 0,
-  "NE": null, "W": null,  "I": null,
-  // VTU
-  "EX": 97,  "DIST": 75, "PASS": 52,
-  // Mumbai / others
-  "O+": 97,  "A1": 90,   "A2": 85,
-  "B1": 78,  "B2": 73,
+  // KLE / VTU / common Indian grading
+  "O":    95,  "S":    93,  "EX":   97,
+  "A+":   90,  "O+":   97,
+  "A":    85,  "A1":   90,  "A2":   85,
+  "B+":   78,  "B1":   78,  "B2":   73,
+  "B":    75,
+  "C+":   68,  "C":    65,
+  "D+":   58,  "D":    55,
+  "P":    52,  "E":    52,  "PASS": 52,  "DIST": 75,
+  "F":    0,   "FAIL": 0,   "FF":   0,
+  // Null-equivalent — detained / not eligible / incomplete / absent
+  "AB":   null, "NE": null, "W": null, "I": null,
+  "X":    null, "XX": null, "DR": null,
 };
 
+// Words that are NEVER a subject name — filter out junk rows
+const NON_SUBJECT_KEYWORDS = [
+  "bachelor", "master", "university", "college", "institute", "school",
+  "department", "semester gpa", "sgpa", "cgpa", "total", "grand total",
+  "result", "register", "registration", "roll", "enrollment",
+  "student name", "student id", "father", "mother", "branch", "programme",
+  "course", "examination", "date of birth", "mobile", "email", "address",
+  "credits earned", "credits registered", "cumulative", "overall",
+  "declaration", "signature", "remarks", "grade card", "marksheet",
+  "mark sheet", "grade sheet", "transcript", "technology", "application",
+  "engineering", "science",   // catches "Bachelor of Computer Application", "Bachelor of Engineering"
+];
+
+/* ─────────────────────────────────────────────────────────────────
+   letterToPercent — handles every grade format
+───────────────────────────────────────────────────────────────── */
 function letterToPercent(val) {
   if (val === null || val === undefined || val === "") return null;
+  const str = String(val).trim();
 
-  const str = String(val).trim().toUpperCase();
+  // Fraction format "45/60" or "67/80"
+  const fracMatch = str.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (fracMatch) {
+    const obtained = parseFloat(fracMatch[1]);
+    const total    = parseFloat(fracMatch[2]);
+    if (total > 0) return Math.round((obtained / total) * 100);
+    return null;
+  }
 
-  // Already a number
+  // Pure number
   const num = parseFloat(str);
   if (!isNaN(num)) {
-    // Grade point on 10-point scale (KLE, VTU etc.)
+    // Integer grade point 0-10
     if (Number.isInteger(num) && num >= 0 && num <= 10) {
       return GRADE_POINT_TO_PERCENT[num] ?? Math.round(num * 9.5);
     }
     // Decimal grade point e.g. 8.5
     if (num > 0 && num <= 10) return Math.round(num * 9.5);
-    // Already a percent
+    // Already a percentage
     if (num > 10 && num <= 100) return Math.round(num);
     return null;
   }
 
-  return LETTER_GRADE_MAP[str] !== undefined ? LETTER_GRADE_MAP[str] : null;
+  // Letter grade lookup
+  const upper = str.toUpperCase();
+  return LETTER_GRADE_MAP.hasOwnProperty(upper) ? LETTER_GRADE_MAP[upper] : null;
 }
 
-/* Sanitise a single subject entry coming from the AI */
+/* ─────────────────────────────────────────────────────────────────
+   isValidSubjectName — reject non-subject rows
+───────────────────────────────────────────────────────────────── */
+function isValidSubjectName(name) {
+  if (!name || typeof name !== "string") return false;
+  const lower = name.toLowerCase().trim();
+
+  // Too short
+  if (lower.length < 4) return false;
+
+  // Pure course code only (e.g. "24EBCBI01", "CS101")
+  if (/^[A-Z0-9]{4,12}$/.test(name.trim())) return false;
+
+  // Pure numbers
+  if (/^\d+$/.test(name.trim())) return false;
+
+  // Contains a non-subject keyword
+  for (const kw of NON_SUBJECT_KEYWORDS) {
+    if (lower.includes(kw)) return false;
+  }
+
+  return true;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   sanitiseSubject — convert one AI subject row to clean format
+───────────────────────────────────────────────────────────────── */
 function sanitiseSubject(raw, index) {
   if (!raw || typeof raw !== "object") return null;
 
-  const name = (raw.name || raw.subject || raw.subjectName || `Subject ${index + 1}`)
+  // Build clean name
+  let name = (raw.name || raw.subject || raw.subjectName || raw.courseName || "")
     .trim()
-    .replace(/^\d+[\.\)]\s*/, "")   // strip leading "1. " numbering
-    .replace(/^[A-Z0-9]{8,}\s+/,"") // strip course codes like "24EBCBI01 "
+    .replace(/^\d+[\.\)\:]\s*/, "")           // strip "1. " or "01) "
+    .replace(/^[A-Z0-9]{4,12}\s+/, "")        // strip leading course code
+    .replace(/\s+[A-Z0-9]{4,12}$/, "")        // strip trailing course code
+    .trim()
     .slice(0, 80);
 
-  if (!name || name.length < 2) return null;
+  if (!isValidSubjectName(name)) return null;
 
   let percent = null;
 
-  // Priority 1: use gradePoint if provided (most accurate for KLE/VTU)
-  if (raw.gradePoint !== null && raw.gradePoint !== undefined) {
+  // Priority 1: gradePoint column (most reliable for KLE/VTU)
+  if (raw.gradePoint !== null && raw.gradePoint !== undefined && raw.gradePoint !== "") {
     percent = letterToPercent(raw.gradePoint);
   }
 
-  // Priority 2: use grade letter
-  if (percent === null && raw.grade !== null && raw.grade !== undefined) {
-    const gradeStr = String(raw.grade).trim();
+  // Priority 2: grade letter column — copy exactly what AI extracted
+  if (percent === null && raw.grade !== null && raw.grade !== undefined && raw.grade !== "") {
+    percent = letterToPercent(String(raw.grade).trim());
+  }
 
-    // Handle fraction format "45/60"
-    const fracMatch = gradeStr.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
-    if (fracMatch) {
-      percent = Math.round((parseFloat(fracMatch[1]) / parseFloat(fracMatch[2])) * 100);
+  // Priority 3: marks obtained / max marks
+  if (percent === null && raw.marksObtained !== null && raw.marksObtained !== undefined) {
+    if (raw.maxMarks) {
+      const obtained = parseFloat(raw.marksObtained);
+      const max      = parseFloat(raw.maxMarks);
+      if (!isNaN(obtained) && !isNaN(max) && max > 0) {
+        percent = Math.round((obtained / max) * 100);
+      }
     } else {
-      percent = letterToPercent(gradeStr);
+      percent = letterToPercent(raw.marksObtained);
     }
   }
 
-  // Priority 3: fallback to percent/score/marks fields
+  // Priority 4: any remaining fallback fields
   if (percent === null) {
-    for (const field of ["percent", "score", "marks"]) {
-      if (raw[field] !== null && raw[field] !== undefined) {
-        percent = letterToPercent(raw[field]);
-        if (percent !== null) break;
+    for (const field of ["percent", "score", "marks", "obtained"]) {
+      if (raw[field] !== null && raw[field] !== undefined && raw[field] !== "") {
+        const p = letterToPercent(raw[field]);
+        if (p !== null) { percent = p; break; }
       }
     }
   }
@@ -111,40 +159,33 @@ function sanitiseSubject(raw, index) {
   if (percent === null || isNaN(percent)) return null;
   percent = Math.max(0, Math.min(100, Math.round(percent)));
 
-  // Color based on performance band
   const COLORS = [
-    { min: 90, color: "#7c3aed" }, // violet — S grade
-    { min: 80, color: "#0284c7" }, // sky    — A grade
-    { min: 70, color: "#059669" }, // emerald — B grade
-    { min: 60, color: "#d97706" }, // amber  — C grade
-    { min: 50, color: "#ea580c" }, // orange — D grade
-    { min: 0,  color: "#dc2626" }, // red    — F grade
+    { min: 90, color: "#7c3aed" }, // violet — S
+    { min: 80, color: "#0284c7" }, // sky    — A
+    { min: 70, color: "#059669" }, // emerald — B
+    { min: 60, color: "#d97706" }, // amber  — C
+    { min: 50, color: "#ea580c" }, // orange — D
+    { min:  0, color: "#dc2626" }, // red    — F
   ];
   const color = COLORS.find(c => percent >= c.min)?.color || "#6b7280";
 
   return { name, percent, color };
 }
 
-/* Generate activity feed from extracted subjects */
+/* ─────────────────────────────────────────────────────────────────
+   Activity + Upcoming helpers
+───────────────────────────────────────────────────────────────── */
 function generateActivity(subjects) {
   return subjects.slice(0, 4).map((s, i) => {
     const times = ["Just now", "Yesterday", "2 days ago", "Last week"];
     let text, color;
-    if (s.percent >= 80) {
-      text = `Scored ${s.percent}% in ${s.name} — keep it up!`;
-      color = "#059669";
-    } else if (s.percent >= 60) {
-      text = `${s.name} at ${s.percent}% — room to improve`;
-      color = "#d97706";
-    } else {
-      text = `Needs urgent review: ${s.name} (${s.percent}%)`;
-      color = "#dc2626";
-    }
+    if (s.percent >= 80)      { text = `Scored ${s.percent}% in ${s.name} — keep it up!`; color = "#059669"; }
+    else if (s.percent >= 60) { text = `${s.name} at ${s.percent}% — room to improve`;     color = "#d97706"; }
+    else                      { text = `Needs urgent review: ${s.name} (${s.percent}%)`;   color = "#dc2626"; }
     return { text, bold: s.name, time: times[i] || "Recently", color };
   });
 }
 
-/* Generate upcoming tasks based on weak subjects */
 function generateUpcoming(subjects) {
   const sorted = [...subjects].sort((a, b) => a.percent - b.percent);
   const tasks  = ["Revision session", "Practice problems", "Mock test", "Doubt clearing"];
@@ -157,12 +198,13 @@ function generateUpcoming(subjects) {
   });
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   POST — main handler
+───────────────────────────────────────────────────────────────── */
 export async function POST(req) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { base64Image } = await req.json();
     if (!base64Image || !base64Image.startsWith("data:image")) {
@@ -173,42 +215,50 @@ export async function POST(req) {
     }
 
     if (!process.env.OPENROUTER_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenRouter API key not configured. Add OPENROUTER_API_KEY to .env.local" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "OpenRouter API key not configured." }, { status: 500 });
     }
 
-    /* ── Prompt: AI extracts raw data, server converts to percent ── */
-    const prompt = `You are an academic result parser specialising in Indian university mark sheets.
+    /* ── PROMPT — explicit, covers every Indian university format ── */
+    const prompt = `You are a precise academic result extraction engine for Indian university mark sheets.
 
-Extract ALL subject results from this image. Return ONLY a raw JSON object — no markdown, no explanation.
+Your ONLY task: extract every subject name and its grade/marks from the table in this image.
 
-Required format:
+Return ONLY raw JSON — absolutely no markdown, no explanation, no surrounding text.
+
+Required JSON format:
 {
-  "semester": "exact semester/exam name as shown (e.g. 'Semester End Examination Results Dec 2024')",
-  "gpa": "exact SGPA or CGPA value as shown (e.g. '9.00'), or 'N/A' if not found",
+  "semester": "exact semester/exam label from the document (e.g. 'Semester End Examination Results Dec 2024')",
+  "gpa": "exact SGPA or CGPA number as a string (e.g. '8.75'), or 'N/A' if not shown",
   "subjects": [
     {
-      "name": "Full course name exactly as shown",
-      "grade": "exact grade letter as shown (e.g. 'A', 'O', 'B+', 'F')",
-      "gradePoint": number or null (grade point value if shown, e.g. 9 for grade A at KLE)
+      "name": "Full descriptive subject/course name only — NO course codes",
+      "grade": "exact grade letter copied from the document (e.g. 'A', 'O', 'B+', 'F', 'X', 'P') — do NOT interpret",
+      "gradePoint": <number if a grade point column exists, e.g. 9, else null>,
+      "marksObtained": <number if raw marks column exists, else null>,
+      "maxMarks": <maximum marks if shown, else null>
     }
   ]
 }
 
-Critical rules:
-- Extract the GRADE LETTER exactly as printed — do NOT convert to percent yourself
-- If grade points (like 9, 8, 10) are shown alongside the letter, include them in gradePoint
-- If marks like 45/60 are shown, put them as a string in grade field (e.g. "45/60")
-- Include ALL subjects visible in the table
-- Course codes like "24EBCBI01" should NOT be in the name — use only the course name
-- If a field is missing, use null
-- If no subjects found, return: {"subjects":[]}
+STRICT EXTRACTION RULES:
+1. ONLY include rows from the SUBJECT/RESULT TABLE. Never include:
+   - Student name, roll number, registration number, enrollment
+   - University/college/institution name
+   - Degree or programme name (e.g. "Bachelor of Computer Application" is NOT a subject)
+   - Branch or department name
+   - SGPA row, CGPA row, Total row, Grand Total row
+   - Any header, footer, watermark, or administrative text
+2. Copy the grade letter EXACTLY as printed. If it says "X" write "X". If it says "A" write "A". Never convert or guess.
+3. If a subject shows raw marks like "58/80" — put "58/80" in the grade field.
+4. Include ALL subject rows from the table — do not skip any.
+5. Course codes (like "24CS101", "21EBCBI01") must NOT appear in the name — only use the descriptive course title.
+6. If grade is blank or shows "-" for a subject, skip it.
+7. The gradePoint field is only for a separate numeric column (like 9, 8, 7) — not the letter grade.
 
-This appears to be a KLE Technological University result where grades are: O(10pts), A(9pts), B(8pts), C(7pts), D(6pts), P(5pts), F(0pts)`;
+This is likely KLE Technological University (O=10pts, A=9pts, B=8pts, C=7pts, D=6pts, P=5pts, F=0pts, X=Detained)
+but handle ANY Indian university format.`;
 
-    console.log(`[ANALYZE] Sending to OpenRouter — image size: ${(base64Image.length / 1024).toFixed(0)}KB`);
+    console.log(`[ANALYZE] Image: ${(base64Image.length / 1024).toFixed(0)}KB`);
 
     const controller = new AbortController();
     const timeout    = setTimeout(() => controller.abort(), 28000);
@@ -220,31 +270,28 @@ This appears to be a KLE Technological University result where grades are: O(10p
         signal: controller.signal,
         headers: {
           "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
-          "X-Title": "MindMesh Academic Analyzer",
+          "Content-Type":  "application/json",
+          "HTTP-Referer":  process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
+          "X-Title":       "MindMesh Academic Analyzer",
         },
         body: JSON.stringify({
-          model: "meta-llama/llama-3.2-11b-vision-instruct",
-          max_tokens: 1000,
-          temperature: 0.05, // very low — we want deterministic extraction
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: base64Image } },
-              ],
-            },
-          ],
+          model:       "meta-llama/llama-3.2-11b-vision-instruct",
+          max_tokens:  1500,  // higher = more subjects extracted
+          temperature: 0.0,   // deterministic — no guessing
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text",      text: prompt },
+              { type: "image_url", image_url: { url: base64Image } },
+            ],
+          }],
         }),
       });
     } catch (fetchErr) {
       clearTimeout(timeout);
       if (fetchErr.name === "AbortError") {
-        console.warn("[ANALYZE] Timed out after 28s");
         return NextResponse.json(
-          { error: "Analysis timed out. The AI is busy — please try again in a moment." },
+          { error: "Analysis timed out — please try again in a moment." },
           { status: 504 }
         );
       }
@@ -256,62 +303,58 @@ This appears to be a KLE Technological University result where grades are: O(10p
       const errText = await openRouterRes.text();
       console.error("[ANALYZE] OpenRouter error:", openRouterRes.status, errText);
       return NextResponse.json(
-        { error: `AI service error (${openRouterRes.status}). Check your OPENROUTER_API_KEY or try again.` },
+        { error: `AI service error (${openRouterRes.status}). Try again.` },
         { status: 502 }
       );
     }
 
-    const data        = await openRouterRes.json();
-    let   aiResponse  = data.choices?.[0]?.message?.content?.trim() || "";
+    const data       = await openRouterRes.json();
+    let   aiResponse = data.choices?.[0]?.message?.content?.trim() || "";
 
-    console.log(`[ANALYZE] Raw AI response (${aiResponse.length} chars):`, aiResponse.slice(0, 300));
+    console.log(`[ANALYZE] AI response (${aiResponse.length} chars):`, aiResponse.slice(0, 500));
 
-    /* ── Parse AI response ── */
+    // Parse JSON from response
     let parsed;
     try {
-      // Strip markdown fences if model added them
       aiResponse = aiResponse
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/\s*```$/i, "")
         .trim();
-
-      // Extract the JSON object even if there's surrounding text
       const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON object found in response");
-
+      if (!jsonMatch) throw new Error("No JSON found");
       parsed = JSON.parse(jsonMatch[0]);
     } catch (parseErr) {
-      console.error("[ANALYZE] JSON parse failed:", parseErr.message, "| Raw:", aiResponse);
+      console.error("[ANALYZE] Parse failed:", parseErr.message, "\nRaw:", aiResponse);
       return NextResponse.json(
-        { error: "Could not parse the marks card. Make sure the image is clear and shows subject marks." },
+        { error: "Could not read the marks card. Make sure the image is clear and well-lit." },
         { status: 422 }
       );
     }
 
-    /* ── Validate subjects array ── */
     const rawSubjects = Array.isArray(parsed.subjects) ? parsed.subjects : [];
-
     if (rawSubjects.length === 0) {
       return NextResponse.json(
-        { error: "No subjects found in the image. Please upload a clearer photo of your marks card." },
+        { error: "No subjects found. Upload a clear photo showing the subject results table." },
         { status: 422 }
       );
     }
 
-    /* ── Sanitise each subject — apply our own conversion logic ── */
+    // Sanitise — server does ALL conversion, AI just extracts raw values
     const subjects = rawSubjects
       .map((s, i) => sanitiseSubject(s, i))
-      .filter(Boolean); // remove nulls
+      .filter(Boolean);
+
+    console.log(`[ANALYZE] ${rawSubjects.length} raw → ${subjects.length} clean subjects:`);
+    subjects.forEach(s => console.log(`  · ${s.name}: ${s.percent}%`));
 
     if (subjects.length === 0) {
       return NextResponse.json(
-        { error: "Subjects were found but marks could not be read. Try a clearer image." },
+        { error: "Subjects found but grades couldn't be read. Try a brighter, clearer image." },
         { status: 422 }
       );
     }
 
-    /* ── Build full metrics object ── */
     const metrics = {
       semester:     (parsed.semester || "Current Semester").trim(),
       gpa:          (parsed.gpa      || "N/A").trim(),
@@ -322,7 +365,6 @@ This appears to be a KLE Technological University result where grades are: O(10p
       lastAnalyzed: new Date(),
     };
 
-    /* ── Persist to user's profile ── */
     await connectDB();
     await User.findByIdAndUpdate(
       session.user.id,
@@ -330,15 +372,11 @@ This appears to be a KLE Technological University result where grades are: O(10p
       { new: true }
     );
 
-    console.log(`[ANALYZE] Success — ${subjects.length} subjects, GPA: ${metrics.gpa}, Semester: ${metrics.semester}`);
-
+    console.log(`[ANALYZE] ✓ Saved — ${subjects.length} subjects, GPA: ${metrics.gpa}`);
     return NextResponse.json({ success: true, metrics });
 
   } catch (err) {
-    console.error("[ANALYZE_RESULT] Unhandled error:", err);
-    return NextResponse.json(
-      { error: "Unexpected server error. Please try again." },
-      { status: 500 }
-    );
+    console.error("[ANALYZE_RESULT] Unhandled:", err);
+    return NextResponse.json({ error: "Unexpected error. Please try again." }, { status: 500 });
   }
 }
