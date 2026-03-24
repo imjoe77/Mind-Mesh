@@ -1,30 +1,26 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { motion, useMotionValue, useTransform, AnimatePresence, animate } from "framer-motion";
-import { X, Heart, MessageCircle, Users, Settings, Inbox, Zap } from "lucide-react";
+import {
+  motion, useMotionValue, useTransform, AnimatePresence, animate,
+} from "framer-motion";
+import { X, Heart, Users, Settings, Inbox, Zap, ChevronRight } from "lucide-react";
 import { useSocket } from "@/app/Components/SocketProvider";
 
-// ─── Avatar helper ─────────────────────────────────────────────────────────
-function Avatar({ user, className = "", size = 40 }) {
-  const src = user?.profilePicture || user?.image || user?.avatar || user?.photo || null;
+// ─── Avatar ────────────────────────────────────────────────────────────────
+function Avatar({ user, size = 40, className = "" }) {
+  const src = user?.profilePicture || user?.image || user?.avatar || null;
   const initials = (user?.name || "?").charAt(0).toUpperCase();
   if (src) {
     return (
       <img
-        src={src}
-        alt={user?.name || ""}
-        width={size}
-        height={size}
+        src={src} alt={user?.name || ""} width={size} height={size}
         referrerPolicy="no-referrer"
         className={`object-cover ${className}`}
         style={{ width: size, height: size, minWidth: size, minHeight: size }}
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-          e.currentTarget.nextSibling?.style && (e.currentTarget.nextSibling.style.display = "flex");
-        }}
+        onError={e => { e.currentTarget.style.display = "none"; e.currentTarget.nextSibling && (e.currentTarget.nextSibling.style.display = "flex"); }}
       />
     );
   }
@@ -38,129 +34,132 @@ function Avatar({ user, className = "", size = 40 }) {
   );
 }
 
-
-// ─── Tinder Swipe Card ─────────────────────────────────────────────────────
+// ─── SwipeCard ──────────────────────────────────────────────────────────────
 function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
-  const x = useMotionValue(0);
-  const rotate = useTransform(x, [-200, 200], [-14, 14]);
-  const likeOpacity = useTransform(x, [30, 110], [0, 1]);
-  const nopeOpacity = useTransform(x, [-110, -30], [1, 0]);
-  const cardOpacity = useTransform(x, [-300, -150, 0, 150, 300], [0, 1, 1, 1, 0]);
-
-  // ── NEW: swipe animation additions ──
-  const cardScale = useTransform(x, [-200, 0, 200], [0.92, 1, 0.92]);
+  const x           = useMotionValue(0);
+  const rotate      = useTransform(x, [-220, 220], [-16, 16]);
+  const likeOpacity = useTransform(x, [30, 120], [0, 1]);
+  const nopeOpacity = useTransform(x, [-120, -30], [1, 0]);
+  const cardOpacity = useTransform(x, [-320, -140, 0, 140, 320], [0, 1, 1, 1, 0]);
+  const cardScale   = useTransform(x, [-220, 0, 220], [0.93, 1, 0.93]);
 
   const handleDragEnd = (_, info) => {
     if (info.offset.x > 120) {
-      // Fly off to the right then fire callback
-      animate(x, 700, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onConnect(user._id));
+      animate(x, 800, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onConnect(user._id));
     } else if (info.offset.x < -120) {
-      // Fly off to the left then fire callback
-      animate(x, -700, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onSkip());
+      animate(x, -800, { duration: 0.38, ease: [0.4, 0, 0.2, 1] }).then(() => onSkip());
     }
   };
 
-  /* unique mesh colours per user based on name char code */
-  const hue = (user.name?.charCodeAt(0) || 200) % 360;
-  const hue2 = (hue + 60) % 360;
+  const hue  = (user.name?.charCodeAt(0) || 200) % 360;
+  const hue2 = (hue + 55) % 360;
 
   return (
     <motion.div
-      className="absolute inset-x-0 mx-auto w-full h-full"
+      className="absolute inset-0"
       style={{
-        x: isTop ? x : 0,
+        x:      isTop ? x : 0,
         rotate: isTop ? rotate : 0,
         opacity: isTop ? cardOpacity : 1,
-        // NEW: squish scale on drag + background card stacking scale
-        scale: isTop ? cardScale : 1 - index * 0.04,
-        y: isTop ? 0 : index * 10,
+        scale:  isTop ? cardScale : 1 - index * 0.035,
+        y:      isTop ? 0 : index * 12,
         zIndex: 10 - index,
-        // NEW: subtle blur on background cards for depth
-        filter: isTop ? undefined : `blur(${index * 0.6}px)`,
+        filter: isTop ? undefined : `blur(${index * 0.5}px)`,
       }}
       drag={isTop ? "x" : false}
       dragConstraints={{ left: 0, right: 0 }}
-      // NEW: springy elastic feel when dragging and snapping back
-      dragElastic={0.18}
-      dragTransition={{ bounceStiffness: 280, bounceDamping: 22 }}
+      dragElastic={0.15}
+      dragTransition={{ bounceStiffness: 300, bounceDamping: 24 }}
       onDragEnd={handleDragEnd}
       whileDrag={{ cursor: "grabbing" }}
     >
       {/* CONNECT / SKIP stamps */}
       {isTop && (
         <>
-          <motion.div style={{ opacity: likeOpacity }}
-            className="absolute top-10 left-6 z-20 px-4 py-2 rounded-xl border-2 border-emerald-400 text-emerald-400 font-black text-lg tracking-widest rotate-[-18deg] pointer-events-none backdrop-blur-sm bg-black/20">
+          <motion.div
+            style={{ opacity: likeOpacity }}
+            className="absolute top-8 left-5 z-20 px-4 py-2 rounded-xl border-[2.5px] border-emerald-400 text-emerald-400 font-black text-base tracking-[.15em] rotate-[-16deg] pointer-events-none backdrop-blur-sm bg-black/20"
+          >
             CONNECT
           </motion.div>
-          <motion.div style={{ opacity: nopeOpacity }}
-            className="absolute top-10 right-6 z-20 px-4 py-2 rounded-xl border-2 border-rose-400 text-rose-400 font-black text-lg tracking-widest rotate-[18deg] pointer-events-none backdrop-blur-sm bg-black/20">
+          <motion.div
+            style={{ opacity: nopeOpacity }}
+            className="absolute top-8 right-5 z-20 px-4 py-2 rounded-xl border-[2.5px] border-rose-400 text-rose-400 font-black text-base tracking-[.15em] rotate-[16deg] pointer-events-none backdrop-blur-sm bg-black/20"
+          >
             SKIP
           </motion.div>
         </>
       )}
 
       {/* ── Card shell ── */}
-      <div className="w-full h-full rounded-3xl overflow-hidden border border-white/[0.1] bg-[#0b0f1a] shadow-2xl flex flex-col select-none">
+      <div className="w-full h-full rounded-[28px] overflow-hidden border border-white/[0.09] bg-[#0d1117] shadow-2xl flex flex-col select-none">
 
-        {/* ── Banner — mesh gradient with avatar centred ── */}
-        <div className="relative flex-shrink-0 h-44 flex items-end justify-center pb-0"
+        {/* ── Banner ── */}
+        <div
+          className="relative flex-shrink-0"
           style={{
+            height: 200,
             background: `
-              radial-gradient(ellipse at 20% 40%, hsla(${hue},70%,55%,0.35) 0%, transparent 60%),
-              radial-gradient(ellipse at 80% 20%, hsla(${hue2},70%,55%,0.25) 0%, transparent 55%),
-              radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.6) 0%, transparent 60%),
-              linear-gradient(160deg, hsla(${hue},60%,18%,1) 0%, hsla(${hue2},50%,12%,1) 100%)
+              radial-gradient(ellipse at 15% 50%, hsla(${hue},72%,52%,0.4) 0%, transparent 55%),
+              radial-gradient(ellipse at 85% 20%, hsla(${hue2},72%,52%,0.3) 0%, transparent 50%),
+              radial-gradient(ellipse at 50% 110%, rgba(0,0,0,0.65) 0%, transparent 55%),
+              linear-gradient(155deg, hsla(${hue},55%,16%,1) 0%, hsla(${hue2},45%,10%,1) 100%)
             `,
           }}
         >
-          {/* dot grid over banner */}
-          <div className="absolute inset-0 opacity-[0.12]"
+          {/* dot grid */}
+          <div
+            className="absolute inset-0 opacity-[0.1]"
             style={{
-              backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.5) 1px, transparent 1px)`,
-              backgroundSize: '28px 28px',
+              backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.6) 1px, transparent 1px)",
+              backgroundSize: "26px 26px",
             }}
           />
 
           {/* match badge */}
           {user.matchScore > 0 && (
-            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur border border-white/10 text-white text-xs font-bold">
-              <Zap style={{ width: 11, height: 11 }} className="text-amber-400" />
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur border border-white/10 text-white text-[11px] font-bold z-10">
+              <Zap style={{ width: 10, height: 10 }} className="text-amber-400" />
               {Math.min(user.matchScore * 15, 99)}% match
             </div>
           )}
 
-          {/* ── Centred avatar ── */}
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-10">
+          {/* Avatar — centred, overlapping bottom of banner */}
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-0 translate-y-1/2 z-10">
             <div
-              className="w-24 h-24 rounded-2xl border-4 border-[#0b0f1a] overflow-hidden shadow-2xl flex items-center justify-center text-3xl font-black text-white"
-              style={{ background: `linear-gradient(135deg, hsl(${hue},65%,45%), hsl(${hue2},65%,40%))` }}
+              className="w-[88px] h-[88px] rounded-2xl border-[3px] border-[#0d1117] overflow-hidden shadow-2xl flex items-center justify-center"
+              style={{ background: `linear-gradient(135deg, hsl(${hue},65%,40%), hsl(${hue2},65%,35%))` }}
             >
-              <Avatar user={user} size={96} />
+              <Avatar user={user} size={88} />
             </div>
             {/* online dot */}
-            <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-400 border-2 border-[#0b0f1a]" />
+            <div className="absolute bottom-1 right-1 w-[14px] h-[14px] rounded-full bg-emerald-400 border-[2.5px] border-[#0d1117]" />
           </div>
         </div>
 
         {/* ── Body ── */}
-        <div className="flex-1 min-h-0 pt-6 px-5 pb-4 overflow-y-auto scrollbar-hide flex flex-col gap-3">
+        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto scrollbar-hide pt-14 px-6 pb-5 gap-4">
 
-          {/* Name + level */}
-          <div className="text-center space-y-1">
-            <h3 
-              className={`font-black text-white tracking-tight leading-none px-2 break-words ${user.name?.length > 15 ? 'text-lg' : 'text-2xl'}`} 
+          {/* Name + badges */}
+          <div className="text-center">
+            <h3
+              className="text-[1.55rem] font-black text-white tracking-tight leading-tight mb-2"
               style={{ fontFamily: "'Syne', sans-serif" }}
             >
               {user.name}
             </h3>
-            <div className="flex items-center justify-center gap-2">
-              <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20">
                 {user.skillLevel || "Student"}
               </span>
-              {user.subjects?.slice(0, 1).map(subj => (
-                <span key={subj} className="inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-white/[0.04] text-gray-500 border border-white/[0.08]">
-                  {subj}
+              {user.branch && (
+                <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/[0.04] text-gray-500 border border-white/[0.08]">
+                  {user.branch}
+                </span>
+              )}
+              {!user.branch && user.subjects?.slice(0, 1).map(s => (
+                <span key={s} className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/[0.04] text-gray-500 border border-white/[0.08]">
+                  {s}
                 </span>
               ))}
             </div>
@@ -168,36 +167,50 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
 
           {/* Bio */}
           {user.bio && (
-            <p className="text-gray-400 text-xs leading-relaxed text-center line-clamp-2 px-2">{user.bio}</p>
+            <p className="text-gray-400 text-[13px] leading-relaxed text-center line-clamp-2 px-1">
+              {user.bio}
+            </p>
           )}
 
           {/* Goal */}
           {user.goal && (
-            <div className="px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.07] flex gap-2 items-start">
-              <Zap className="text-amber-400 flex-shrink-0 mt-0.5" style={{ width: 12, height: 12 }} />
-              <p className="text-xs text-gray-300 leading-relaxed">{user.goal}</p>
+            <div className="px-3.5 py-2.5 rounded-2xl bg-white/[0.03] border border-white/[0.07] flex gap-2.5 items-start">
+              <Zap className="text-amber-400 flex-shrink-0 mt-0.5" style={{ width: 13, height: 13 }} />
+              <p className="text-[12px] text-gray-300 leading-relaxed">{user.goal}</p>
             </div>
           )}
 
-          {/* ── Skills & Expertise ── */}
-          <div className="flex flex-col gap-4 mt-auto">
-            {/* TEACHES section */}
+          {/* No profile data fallback */}
+          {!user.bio && !user.goal && !user.skillsToTeach?.length && !user.skillsToLearn?.length && (
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 py-6">
+              <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.07] flex items-center justify-center">
+                <Users className="text-gray-700" style={{ width: 18, height: 18 }} />
+              </div>
+              <p className="text-gray-600 text-xs text-center">Profile not filled yet</p>
+            </div>
+          )}
+
+          {/* Skills */}
+          <div className="flex flex-col gap-3 mt-auto">
             {user.skillsToTeach?.length > 0 && (
-              <div className="relative overflow-hidden group">
-                <div className="flex items-center gap-2 mb-2 px-1">
-                  <div className="w-5 h-5 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                    <Users className="text-emerald-400" style={{ width: 12, height: 12 }} />
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-4 h-4 rounded-md bg-emerald-500/10 flex items-center justify-center">
+                    <Users className="text-emerald-400" style={{ width: 10, height: 10 }} />
                   </div>
-                  <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-[0.15em]">Teaches</p>
-                  <div className="flex-1 h-[1px] bg-gradient-to-r from-emerald-500/20 to-transparent" />
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-[.15em]">Teaches</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-emerald-500/20 to-transparent" />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {user.skillsToTeach.slice(0, 4).map(s => (
-                    <span key={s} className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
-                      mySkills.learn?.includes(s)
-                        ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/20"
-                        : "bg-white/[0.04] text-gray-400 border border-white/[0.08] hover:bg-white/[0.08]"
-                    }`}>
+                  {user.skillsToTeach.slice(0, 5).map(s => (
+                    <span
+                      key={s}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        mySkills.learn?.includes(s)
+                          ? "bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                          : "bg-white/[0.04] text-gray-400 border border-white/[0.08]"
+                      }`}
+                    >
                       {mySkills.learn?.includes(s) && "✓ "}{s}
                     </span>
                   ))}
@@ -205,23 +218,25 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
               </div>
             )}
 
-            {/* LEARNING section */}
             {user.skillsToLearn?.length > 0 && (
-              <div className="relative overflow-hidden group">
-                <div className="flex items-center gap-2 mb-2 px-1">
-                  <div className="w-5 h-5 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                    <Zap className="text-sky-400" style={{ width: 12, height: 12 }} />
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-4 h-4 rounded-md bg-sky-500/10 flex items-center justify-center">
+                    <Zap className="text-sky-400" style={{ width: 10, height: 10 }} />
                   </div>
-                  <p className="text-[10px] text-sky-400 font-bold uppercase tracking-[0.15em]">Learning</p>
-                  <div className="flex-1 h-[1px] bg-gradient-to-r from-sky-500/20 to-transparent" />
+                  <span className="text-[10px] text-sky-400 font-bold uppercase tracking-[.15em]">Learning</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-sky-500/20 to-transparent" />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {user.skillsToLearn.slice(0, 4).map(s => (
-                    <span key={s} className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
-                      mySkills.teach?.includes(s)
-                        ? "bg-gradient-to-br from-sky-500 to-sky-600 text-white shadow-lg shadow-sky-500/20"
-                        : "bg-white/[0.04] text-gray-400 border border-white/[0.08] hover:bg-white/[0.08]"
-                    }`}>
+                  {user.skillsToLearn.slice(0, 5).map(s => (
+                    <span
+                      key={s}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all ${
+                        mySkills.teach?.includes(s)
+                          ? "bg-gradient-to-br from-sky-500 to-sky-600 text-white shadow-md shadow-sky-500/20"
+                          : "bg-white/[0.04] text-gray-400 border border-white/[0.08]"
+                      }`}
+                    >
                       {mySkills.teach?.includes(s) && "✓ "}{s}
                     </span>
                   ))}
@@ -233,26 +248,27 @@ function SwipeCard({ user, mySkills, onConnect, onSkip, isTop, index }) {
 
         {/* drag hint */}
         {isTop && (
-          <p className="text-center text-gray-700 text-[9px] pb-3 tracking-[0.2em] uppercase">drag to swipe</p>
+          <p className="text-center text-gray-700 text-[9px] pb-3 tracking-[.2em] uppercase flex-shrink-0">
+            drag to swipe
+          </p>
         )}
       </div>
     </motion.div>
   );
 }
 
-// ─── Main Page ─────────────────────────────────────────────────────────────
+// ─── Main Page ──────────────────────────────────────────────────────────────
 export default function DiscoverPage() {
   const { data: session } = useSession();
   const router = useRouter();
   const { socket: globalSocket } = useSocket();
 
-  const [users, setUsers] = useState([]);
+  const [users, setUsers]               = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [actionMsg, setActionMsg] = useState("");
-  const [swipeDir, setSwipeDir] = useState(null);
-  const [mySkills, setMySkills] = useState({ teach: [], learn: [] });
-  const [showSetup, setShowSetup] = useState(false);
+  const [loading, setLoading]           = useState(true);
+  const [actionMsg, setActionMsg]       = useState("");
+  const [mySkills, setMySkills]         = useState({ teach: [], learn: [] });
+  const [showSetup, setShowSetup]       = useState(false);
 
   const [teachInput, setTeachInput] = useState("");
   const [learnInput, setLearnInput] = useState("");
@@ -260,17 +276,15 @@ export default function DiscoverPage() {
   const [learnSkills, setLearnSkills] = useState([]);
   const [savingProfile, setSavingProfile] = useState(false);
 
-  const [tab, setTab] = useState("discover");
-  const [connections, setConnections] = useState([]);
+  const [tab, setTab]                     = useState("discover");
+  const [connections, setConnections]     = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
-  const [respondingTo, setRespondingTo] = useState(null);
-
-  const [openChat, setOpenChat] = useState(null);
+  const [respondingTo, setRespondingTo]   = useState(null);
 
   const fetchDiscover = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/users/discover");
+      const res  = await fetch("/api/users/discover");
       const data = await res.json();
       if (res.ok) {
         setUsers(data.users || []);
@@ -284,16 +298,14 @@ export default function DiscoverPage() {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await fetch("/api/users/connections");
+      const res  = await fetch("/api/users/connections");
       const data = await res.json();
       if (res.ok) { setConnections(data.connections || []); setPendingRequests(data.pendingRequests || []); }
     } catch (err) { console.error(err); }
   }, []);
 
   useEffect(() => {
-    if (session) {
-      fetchDiscover(); fetchConnections();
-    }
+    if (session) { fetchDiscover(); fetchConnections(); }
   }, [session, fetchDiscover, fetchConnections]);
 
   useEffect(() => {
@@ -304,15 +316,10 @@ export default function DiscoverPage() {
     }
   }, [session, showSetup]);
 
-  const handleSkip = () => {
-    setSwipeDir("left");
-    setTimeout(() => { setSwipeDir(null); setCurrentIndex(i => i + 1); }, 300);
-  };
-
+  const handleSkip    = () => { setTimeout(() => setCurrentIndex(i => i + 1), 320); };
   const handleConnect = async (userId) => {
-    setSwipeDir("right");
     try {
-      const res = await fetch("/api/users/follow", {
+      const res  = await fetch("/api/users/follow", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetUserId: userId, message: "Let's study together!" }),
       });
@@ -320,7 +327,7 @@ export default function DiscoverPage() {
       setActionMsg(res.ok ? "Request sent! 🎉" : data.error);
       setTimeout(() => setActionMsg(""), 2500);
     } catch { setActionMsg("Failed"); setTimeout(() => setActionMsg(""), 2000); }
-    setTimeout(() => { setSwipeDir(null); setCurrentIndex(i => i + 1); }, 300);
+    setTimeout(() => setCurrentIndex(i => i + 1), 320);
   };
 
   const handleRespond = async (requesterId, action) => {
@@ -335,16 +342,8 @@ export default function DiscoverPage() {
     finally { setRespondingTo(null); }
   };
 
-  const addTeachSkill = () => {
-    const s = teachInput.trim();
-    if (s && !teachSkills.includes(s)) setTeachSkills([...teachSkills, s]);
-    setTeachInput("");
-  };
-  const addLearnSkill = () => {
-    const s = learnInput.trim();
-    if (s && !learnSkills.includes(s)) setLearnSkills([...learnSkills, s]);
-    setLearnInput("");
-  };
+  const addTeachSkill = () => { const s = teachInput.trim(); if (s && !teachSkills.includes(s)) setTeachSkills([...teachSkills, s]); setTeachInput(""); };
+  const addLearnSkill = () => { const s = learnInput.trim(); if (s && !learnSkills.includes(s)) setLearnSkills([...learnSkills, s]); setLearnInput(""); };
 
   const saveProfile = async () => {
     setSavingProfile(true);
@@ -359,6 +358,7 @@ export default function DiscoverPage() {
     finally { setSavingProfile(false); }
   };
 
+  // ── Not signed in ──────────────────────────────────────────────────────
   if (!session) {
     return (
       <div className="min-h-screen bg-[#060810] flex items-center justify-center px-4">
@@ -378,13 +378,12 @@ export default function DiscoverPage() {
     );
   }
 
-  // ── Skills Setup ─────────────────────────────────────────────────────────
+  // ── Skills setup ────────────────────────────────────────────────────────
   if (showSetup) {
     return (
       <div className="min-h-screen bg-[#060810] flex items-center justify-center px-4 py-12">
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className="w-full max-w-lg rounded-3xl border border-white/[0.08] bg-[#0d1117] p-8 shadow-2xl"
         >
@@ -396,7 +395,6 @@ export default function DiscoverPage() {
             <p className="text-gray-500 text-sm">Tell us what you can teach and what you want to learn.</p>
           </div>
 
-          {/* Teach */}
           <div className="mb-6">
             <label className="block text-xs font-bold text-emerald-400 uppercase tracking-widest mb-2">Skills I Can Teach</label>
             <div className="flex gap-2 mb-2">
@@ -415,7 +413,6 @@ export default function DiscoverPage() {
             </div>
           </div>
 
-          {/* Learn */}
           <div className="mb-8">
             <label className="block text-xs font-bold text-sky-400 uppercase tracking-widest mb-2">Skills I Want to Learn</label>
             <div className="flex gap-2 mb-2">
@@ -445,50 +442,44 @@ export default function DiscoverPage() {
     );
   }
 
-  const currentUser = users[currentIndex];
-  // DMs removed, no more unread message counts
   const visibleStack = users.slice(currentIndex, currentIndex + 3);
+  const currentUser  = users[currentIndex];
 
   const TABS = [
-    { id: "discover",     label: "Discover",     icon: Zap },
-    { id: "requests",     label: "Requests",     icon: Inbox,   badge: pendingRequests.length },
-    { id: "connections",  label: "Connections",  icon: Users,   badge: connections.length },
+    { id: "discover",    label: "Discover",    icon: Zap   },
+    { id: "requests",    label: "Requests",    icon: Inbox,  badge: pendingRequests.length },
+    { id: "connections", label: "Connections", icon: Users,  badge: connections.length },
   ];
 
   return (
     <div className="min-h-screen bg-[#060810]">
-
       {/* ambient bg */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.05)_0%,transparent_70%)]" />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.05)_0%,transparent_70%)]" />
+        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.045)_0%,transparent_70%)]" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.04)_0%,transparent_70%)]" />
       </div>
 
-      <div className="relative z-10 max-w-5xl mx-auto px-4 py-8">
+      <div className="relative z-10 max-w-6xl mx-auto px-4 py-8">
 
-        {/* ── Page header ── */}
+        {/* ── Header ── */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>
-              Discover
-            </h1>
+            <h1 className="text-3xl font-black text-white tracking-tight" style={{ fontFamily: "'Syne', sans-serif" }}>Discover</h1>
             <p className="text-gray-500 text-sm mt-0.5">Find your perfect study partner</p>
           </div>
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.97 }}
             onClick={() => setShowSetup(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 hover:text-white text-xs font-semibold transition-all hover:bg-white/[0.06]"
-          >
-            <Settings style={{ width: 13, height: 13 }} />
-            Edit Skills
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-gray-400 hover:text-white text-xs font-semibold transition-all hover:bg-white/[0.06]">
+            <Settings style={{ width: 13, height: 13 }} /> Edit Skills
           </motion.button>
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.07] rounded-2xl p-1.5 mb-8 max-w-md">
+        <div className="flex gap-1 bg-white/[0.03] border border-white/[0.07] rounded-2xl p-1.5 mb-8 w-fit">
           {TABS.map(({ id, label, icon: Icon, badge }) => (
             <button key={id}
               onClick={() => { setTab(id); if (id !== "discover") fetchConnections(); }}
-              className={`relative flex-1 flex items-center justify-center gap-1.5 text-xs py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+              className={`relative flex items-center justify-center gap-1.5 text-xs py-2.5 px-5 rounded-xl font-semibold transition-all duration-200 ${
                 tab === id
                   ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/20"
                   : "text-gray-500 hover:text-gray-300"
@@ -519,18 +510,19 @@ export default function DiscoverPage() {
           )}
         </AnimatePresence>
 
-        {/* ════════════════════════════════════════
-            DISCOVER TAB — tinder card stack
-        ════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════
+            DISCOVER TAB
+        ══════════════════════════════════════ */}
         {tab === "discover" && (
+          /* ── KEY FIX: card gets a fixed pixel width, sidebar is independent ── */
           <div className="flex flex-col lg:flex-row gap-8 items-start justify-center">
 
-            {/* Card Stack */}
-            <div className="flex flex-col items-center gap-6 w-full lg:w-auto">
+            {/* Card area — always 380px wide, centred on mobile */}
+            <div className="flex flex-col items-center gap-6 mx-auto lg:mx-0 w-[380px] flex-shrink-0">
               {loading ? (
-                <div className="w-full max-w-[450px] h-[580px] rounded-3xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                <div className="w-[380px] h-[600px] rounded-[28px] bg-white/[0.03] border border-white/[0.06] animate-pulse" />
               ) : !currentUser ? (
-                <div className="w-full max-w-[450px] h-[580px] rounded-3xl border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
+                <div className="w-[380px] h-[600px] rounded-[28px] border border-white/[0.08] bg-white/[0.02] flex flex-col items-center justify-center text-center px-8 gap-4">
                   <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
                     <Zap className="text-gray-600" style={{ width: 28, height: 28 }} />
                   </div>
@@ -546,77 +538,66 @@ export default function DiscoverPage() {
                 </div>
               ) : (
                 <>
-                  {/* card stack */}
-                  <div className="relative w-full max-w-[450px] h-[580px]">
+                  {/* Card stack — fixed 380×600 */}
+                  <div className="relative w-[380px] h-[600px]">
                     {[...visibleStack].reverse().map((user, revIdx) => {
                       const idx = visibleStack.length - 1 - revIdx;
                       return (
                         <SwipeCard
-                          key={user._id}
-                          user={user}
-                          mySkills={mySkills}
-                          onConnect={handleConnect}
-                          onSkip={handleSkip}
-                          isTop={idx === 0}
-                          index={idx}
+                          key={user._id} user={user} mySkills={mySkills}
+                          onConnect={handleConnect} onSkip={handleSkip}
+                          isTop={idx === 0} index={idx}
                         />
                       );
                     })}
                   </div>
 
                   {/* Action buttons */}
-                  <div className="flex items-center gap-4">
-                    <motion.button
-                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                  <div className="flex items-center gap-5">
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
                       onClick={handleSkip}
-                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/25 transition-all shadow-lg"
-                    >
+                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/25 transition-all shadow-lg">
                       <X style={{ width: 22, height: 22 }} />
                     </motion.button>
-
-                    <motion.button
-                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                    <motion.button whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
                       onClick={() => handleConnect(currentUser._id)}
-                      className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/30"
-                    >
-                      <Heart style={{ width: 24, height: 24 }} />
+                      className="w-[68px] h-[68px] rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/30">
+                      <Heart style={{ width: 26, height: 26 }} />
                     </motion.button>
-
-                    <motion.button
-                      whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
-                      onClick={() => handleSkip()}
-                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/[0.08] transition-all shadow-lg"
-                    >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                      </svg>
+                    <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.92 }}
+                      onClick={handleSkip}
+                      className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.09] flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/[0.08] transition-all shadow-lg">
+                      <ChevronRight style={{ width: 22, height: 22 }} />
                     </motion.button>
                   </div>
 
-                  <p className="text-gray-700 text-xs tracking-widest uppercase">{currentIndex + 1} of {users.length} matches</p>
+                  <p className="text-gray-700 text-xs tracking-widest uppercase">
+                    {currentIndex + 1} of {users.length} matches
+                  </p>
                 </>
               )}
             </div>
 
-            {/* Sidebar tip card */}
+            {/* Sidebar — only shows on lg+ */}
             {currentUser && (
               <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="hidden lg:block w-72 space-y-4"
+                transition={{ duration: 0.5, delay: 0.15 }}
+                className="hidden lg:flex flex-col gap-4 w-64 pt-2"
               >
-                <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-6 shadow-xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-sky-500/5 blur-2xl rounded-full" />
-                  <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] mb-4">HOW IT WORKS</p>
-                  <div className="space-y-4">
+                {/* How it works */}
+                <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-5 shadow-xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-20 h-20 bg-sky-500/5 blur-2xl rounded-full" />
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-[.2em] mb-4">HOW IT WORKS</p>
+                  <div className="space-y-3.5">
                     {[
-                      { icon: <motion.span animate={{ x: [-2, 2, -2] }} transition={{ repeat: Infinity, duration: 2 }}>←</motion.span>, label: "Swipe left to skip", color: "text-rose-400" },
-                      { icon: <motion.span animate={{ x: [2, -2, 2] }} transition={{ repeat: Infinity, duration: 2 }}>→</motion.span>, label: "Swipe right to connect", color: "text-emerald-400" },
-                      { icon: "✓", label: "Highlighted skills = match", color: "text-sky-400" },
+                      { icon: "←", label: "Swipe left to skip",       color: "text-rose-400"    },
+                      { icon: "→", label: "Swipe right to connect",   color: "text-emerald-400" },
+                      { icon: "✓", label: "Highlighted = skill match", color: "text-sky-400"     },
                     ].map(({ icon, label, color }) => (
-                      <div key={label} className="flex items-center gap-4 text-xs">
-                        <span className={`w-8 h-8 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center font-black ${color} flex-shrink-0 shadow-inner`}>
+                      <div key={label} className="flex items-center gap-3 text-xs">
+                        <span className={`w-7 h-7 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center font-black ${color} flex-shrink-0`}>
                           {icon}
                         </span>
                         <span className="text-gray-400 font-medium">{label}</span>
@@ -625,17 +606,20 @@ export default function DiscoverPage() {
                   </div>
                 </div>
 
+                {/* Your skills */}
                 {mySkills.teach?.length > 0 && (
-                  <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-6 shadow-xl">
-                    <div className="flex items-center gap-2 mb-4">
-                      <div className="w-6 h-6 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                        <Zap className="text-sky-400" style={{ width: 14, height: 14 }} />
+                  <div className="rounded-3xl border border-white/[0.08] bg-[#0d1117] p-5 shadow-xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-5 h-5 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                        <Zap className="text-sky-400" style={{ width: 12, height: 12 }} />
                       </div>
-                      <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">YOUR SKILLS</p>
+                      <p className="text-[10px] font-black text-white/40 uppercase tracking-[.2em]">YOUR SKILLS</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5">
                       {mySkills.teach.map(s => (
-                        <span key={s} className="text-[11px] px-3 py-1.5 rounded-xl bg-sky-500/5 border border-sky-500/10 text-sky-400 hover:bg-sky-500/10 transition-colors font-bold cursor-default">{s}</span>
+                        <span key={s} className="text-[11px] px-2.5 py-1 rounded-xl bg-sky-500/5 border border-sky-500/10 text-sky-400 font-bold">
+                          {s}
+                        </span>
                       ))}
                     </div>
                   </div>
@@ -645,9 +629,9 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* ════════════════════════════════════════
+        {/* ══════════════════════════════════════
             REQUESTS TAB
-        ════════════════════════════════════════ */}
+        ══════════════════════════════════════ */}
         {tab === "requests" && (
           <div className="max-w-lg mx-auto space-y-3">
             {pendingRequests.length === 0 ? (
@@ -655,99 +639,85 @@ export default function DiscoverPage() {
                 <Inbox className="mx-auto text-gray-700 mb-3" style={{ width: 36, height: 36 }} />
                 <p className="text-gray-500 text-sm">No pending requests right now.</p>
               </div>
-            ) : (
-              pendingRequests.map(req => (
-                <motion.div
-                  key={req.from._id || req.from}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5 flex items-center gap-4"
-                >
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 overflow-hidden flex-shrink-0">
-                    <Avatar user={req.from} size={48} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-white text-sm">{req.from.name}</p>
-                    <p className="text-xs text-gray-500 truncate">{req.from.bio || "Wants to connect"}</p>
-                    {req.from.skillsToTeach?.length > 0 && (
-                      <div className="flex gap-1 mt-1.5 flex-wrap">
-                        {req.from.skillsToTeach.slice(0, 3).map(s => (
-                          <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">{s}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={() => handleRespond(req.from._id, "reject")} disabled={respondingTo === req.from._id}
-                      className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] text-gray-500 hover:text-rose-400 hover:border-rose-500/25 transition-all disabled:opacity-40 flex items-center justify-center">
-                      <X style={{ width: 14, height: 14 }} />
-                    </button>
-                    <button onClick={() => handleRespond(req.from._id, "accept")} disabled={respondingTo === req.from._id}
-                      className="px-4 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors disabled:opacity-40">
-                      {respondingTo === req.from._id ? "..." : "Accept"}
-                    </button>
-                  </div>
-                </motion.div>
-              ))
-            )}
+            ) : pendingRequests.map(req => (
+              <motion.div key={req.from._id || req.from}
+                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5 flex items-center gap-4"
+              >
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 overflow-hidden flex-shrink-0">
+                  <Avatar user={req.from} size={48} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-white text-sm">{req.from.name}</p>
+                  <p className="text-xs text-gray-500 truncate">{req.from.bio || "Wants to connect"}</p>
+                  {req.from.skillsToTeach?.length > 0 && (
+                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                      {req.from.skillsToTeach.slice(0, 3).map(s => (
+                        <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => handleRespond(req.from._id, "reject")} disabled={respondingTo === req.from._id}
+                    className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] text-gray-500 hover:text-rose-400 hover:border-rose-500/25 transition-all disabled:opacity-40 flex items-center justify-center">
+                    <X style={{ width: 14, height: 14 }} />
+                  </button>
+                  <button onClick={() => handleRespond(req.from._id, "accept")} disabled={respondingTo === req.from._id}
+                    className="px-4 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors disabled:opacity-40">
+                    {respondingTo === req.from._id ? "..." : "Accept"}
+                  </button>
+                </div>
+              </motion.div>
+            ))}
           </div>
         )}
 
-        {/* ════════════════════════════════════════
+        {/* ══════════════════════════════════════
             CONNECTIONS TAB
-        ════════════════════════════════════════ */}
+        ══════════════════════════════════════ */}
         {tab === "connections" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 items-start">
-            <div className="space-y-3">
-              {connections.length === 0 ? (
-                <div className="text-center py-20 rounded-3xl border border-white/[0.07] bg-white/[0.02]">
-                  <Users className="mx-auto text-gray-700 mb-3" style={{ width: 36, height: 36 }} />
-                  <h3 className="text-base font-black text-white mb-1" style={{ fontFamily: "'Syne', sans-serif" }}>No connections yet</h3>
-                  <p className="text-gray-500 text-sm mb-6">Start swiping to find your study partners!</p>
-                  <button onClick={() => setTab("discover")} className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white rounded-xl text-sm font-bold">Go to Discover</button>
+          <div className="max-w-lg mx-auto space-y-3">
+            {connections.length === 0 ? (
+              <div className="text-center py-20 rounded-3xl border border-white/[0.07] bg-white/[0.02]">
+                <Users className="mx-auto text-gray-700 mb-3" style={{ width: 36, height: 36 }} />
+                <h3 className="text-base font-black text-white mb-1" style={{ fontFamily: "'Syne', sans-serif" }}>No connections yet</h3>
+                <p className="text-gray-500 text-sm mb-6">Start swiping to find your study partners!</p>
+                <button onClick={() => setTab("discover")}
+                  className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white rounded-xl text-sm font-bold">
+                  Go to Discover
+                </button>
+              </div>
+            ) : connections.map(conn => (
+              <motion.div key={conn._id}
+                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl border border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] p-5 transition-all duration-200"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
+                    {conn.profilePicture
+                      ? <img src={conn.profilePicture} alt="" className="w-full h-full object-cover" />
+                      : conn.name?.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-white text-sm">{conn.name}</p>
+                    <p className="text-xs text-gray-500">{conn.skillLevel || "Student"}</p>
+                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                      {(conn.skillsToTeach || []).slice(0, 2).map(s => (
+                        <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">
+                          Teaches {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                    onClick={() => router.push(`/groups/create?inviteId=${conn._id}&inviteName=${encodeURIComponent(conn.name)}`)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-600 transition-all flex-shrink-0">
+                    <Users style={{ width: 12, height: 12 }} /> Study Group
+                  </motion.button>
                 </div>
-              ) : (
-                connections.map(conn => {
-                  const isActive = openChat?._id === conn._id;
-                  return (
-                    <motion.div key={conn._id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`rounded-2xl border p-5 transition-all duration-200 ${
-                        isActive ? "border-sky-500/30 bg-sky-500/[0.04]" : "border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]"
-                      }`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
-                          {conn.profilePicture ? <img src={conn.profilePicture} alt="" className="w-full h-full object-cover" /> : conn.name?.charAt(0)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-white text-sm">{conn.name}</p>
-                          <p className="text-xs text-gray-500">{conn.skillLevel || "Student"}</p>
-                          <div className="flex gap-1 mt-1.5 flex-wrap">
-                            {(conn.skillsToTeach || []).slice(0, 2).map(s => (
-                              <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/8 text-emerald-400 border border-emerald-500/20">Teaches {s}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2 flex-shrink-0">
-                          {/* Message button removed as per request */}
-                          <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
-                            onClick={() => router.push(`/groups/create?inviteId=${conn._id}&inviteName=${encodeURIComponent(conn.name)}`)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/[0.04] border border-white/[0.08] text-gray-400 hover:text-white hover:bg-indigo-600 hover:border-indigo-600 transition-all"
-                          >
-                            <Users style={{ width: 12, height: 12 }} />
-                            Study Group
-                          </motion.button>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Default prompt when Study Group button clicked can be shown here if needed, but the button navigates away. */}
+              </motion.div>
+            ))}
           </div>
         )}
 
