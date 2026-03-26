@@ -25,24 +25,29 @@ const LETTER_GRADE_MAP = {
   "B":    75,
   "C+":   68,  "C":    65,
   "D+":   58,  "D":    55,
-  "P":    52,  "E":    52,  "PASS": 52,  "DIST": 75,
+  "E":    52,  // KLE Pass equivalent
+  "P":    52,  "PASS": 52,  "DIST": 75,
   "F":    0,   "FAIL": 0,   "FF":   0,
-  // Null-equivalent — detained / not eligible / incomplete / absent
+  // Detained / not eligible / absent — show as 0, still include in results
+  "X":    0,   "XX":   0,   "DR":   0,
+  // Truly null — no grade info at all, skip
   "AB":   null, "NE": null, "W": null, "I": null,
-  "X":    null, "XX": null, "DR": null,
 };
 
-// Words that are NEVER a subject name — filter out junk rows
-const NON_SUBJECT_KEYWORDS = [
-  "bachelor", "master", "university", "college", "institute", "school",
-  "department", "semester gpa", "sgpa", "cgpa", "total", "grand total",
-  "result", "register", "registration", "roll", "enrollment",
-  "student name", "student id", "father", "mother", "branch", "programme",
-  "course", "examination", "date of birth", "mobile", "email", "address",
-  "credits earned", "credits registered", "cumulative", "overall",
-  "declaration", "signature", "remarks", "grade card", "marksheet",
-  "mark sheet", "grade sheet", "transcript", "technology", "application",
-  "engineering", "science",   // catches "Bachelor of Computer Application", "Bachelor of Engineering"
+// Words/phrases that are NEVER a subject name — checked as full words to avoid false matches
+// e.g. "science" alone would block "Computer Science" so we check boundaries
+const NON_SUBJECT_KEYWORDS_EXACT = [
+  "bachelor of", "master of", "b.tech", "m.tech", "b.e.", "m.e.",
+  "b.c.a", "m.c.a", "b.sc", "m.sc", "b.com", "m.com",
+];
+const NON_SUBJECT_KEYWORDS_CONTAINS = [
+  "semester gpa", "sgpa", "cgpa", "grand total", "total credits",
+  "credits earned", "credits registered", "cumulative gpa",
+  "student name", "student id", "roll number", "enrollment no",
+  "registration no", "date of birth", "mobile no", "email id",
+  "father's name", "mother's name", "declaration", "signature",
+  "grade card", "mark sheet", "marksheet", "grade sheet", "transcript",
+  "university", "college", "institute", "department",
 ];
 
 /* ─────────────────────────────────────────────────────────────────
@@ -96,8 +101,13 @@ function isValidSubjectName(name) {
   // Pure numbers
   if (/^\d+$/.test(name.trim())) return false;
 
-  // Contains a non-subject keyword
-  for (const kw of NON_SUBJECT_KEYWORDS) {
+  // Exact prefix matches (degree names like "Bachelor of ...")
+  for (const kw of NON_SUBJECT_KEYWORDS_EXACT) {
+    if (lower.startsWith(kw)) return false;
+  }
+
+  // Substring matches for administrative text
+  for (const kw of NON_SUBJECT_KEYWORDS_CONTAINS) {
     if (lower.includes(kw)) return false;
   }
 
@@ -120,6 +130,14 @@ function sanitiseSubject(raw, index) {
     .slice(0, 80);
 
   if (!isValidSubjectName(name)) return null;
+
+  // Detect detained/null grades before trying to extract percent
+  const gradeRaw = raw.grade ? String(raw.grade).trim().toUpperCase() : null;
+  const isDetained = gradeRaw === "X" || gradeRaw === "XX" || gradeRaw === "DR";
+  const isNullGrade = gradeRaw && ["AB", "NE", "W", "I"].includes(gradeRaw);
+
+  // Skip truly null grades (absent/not eligible with no marks info)
+  if (isNullGrade && !raw.gradePoint && !raw.marksObtained) return null;
 
   let percent = null;
 
@@ -156,6 +174,9 @@ function sanitiseSubject(raw, index) {
     }
   }
 
+  // Detained subjects (X grade) — include with 0% so they show up
+  if (percent === null && isDetained) percent = 0;
+
   if (percent === null || isNaN(percent)) return null;
   percent = Math.max(0, Math.min(100, Math.round(percent)));
 
@@ -164,12 +185,18 @@ function sanitiseSubject(raw, index) {
     { min: 80, color: "#0284c7" }, // sky    — A
     { min: 70, color: "#059669" }, // emerald — B
     { min: 60, color: "#d97706" }, // amber  — C
-    { min: 50, color: "#ea580c" }, // orange — D
-    { min:  0, color: "#dc2626" }, // red    — F
+    { min: 50, color: "#ea580c" }, // orange — D/E
+    { min:  1, color: "#dc2626" }, // red    — F
+    { min:  0, color: "#7f1d1d" }, // dark red — X detained
   ];
-  const color = COLORS.find(c => percent >= c.min)?.color || "#6b7280";
+  const color = COLORS.find(c => percent >= c.min)?.color || "#7f1d1d";
 
-  return { name, percent, color };
+  return {
+    name,
+    percent,
+    color,
+    ...(isDetained ? { detained: true } : {}),
+  };
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -249,11 +276,12 @@ STRICT EXTRACTION RULES:
    - SGPA row, CGPA row, Total row, Grand Total row
    - Any header, footer, watermark, or administrative text
 2. Copy the grade letter EXACTLY as printed. If it says "X" write "X". If it says "A" write "A". Never convert or guess.
-3. If a subject shows raw marks like "58/80" — put "58/80" in the grade field.
-4. Include ALL subject rows from the table — do not skip any.
-5. Course codes (like "24CS101", "21EBCBI01") must NOT appear in the name — only use the descriptive course title.
-6. If grade is blank or shows "-" for a subject, skip it.
-7. The gradePoint field is only for a separate numeric column (like 9, 8, 7) — not the letter grade.
+3. IMPORTANT: Include X (Detained) grade subjects — do NOT skip them. They are valid results.
+4. If a subject shows raw marks like "58/80" — put "58/80" in the grade field.
+5. Include ALL subject rows from the table — do not skip any, including detained/failed ones.
+6. Course codes (like "24CS101", "21EBCBI01") must NOT appear in the name — only use the descriptive course title.
+7. If grade is completely blank or shows "-" for a subject, skip it.
+8. The gradePoint field is only for a separate numeric column (like 9, 8, 7) — not the letter grade.
 
 This is likely KLE Technological University (O=10pts, A=9pts, B=8pts, C=7pts, D=6pts, P=5pts, F=0pts, X=Detained)
 but handle ANY Indian university format.`;
