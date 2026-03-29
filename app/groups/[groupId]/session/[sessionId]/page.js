@@ -529,6 +529,12 @@ Answer based on the document. If predicting beyond what is stated, prefix with "
 
 /* ══════════════════════════════════════════════════════════════════
    MEDIA PANEL — WebRTC mesh for multi-user video/screen
+   ─── Robust implementation with:
+     • ICE candidate buffering (no lost candidates)
+     • Perfect negotiation pattern (no glare/collision)
+     • Automatic reconnection with backoff
+     • TURN server fallback for symmetric NATs
+     • Proper stream lifecycle management
 ══════════════════════════════════════════════════════════════════ */
 const ICE_CFG = {
   iceServers: [
@@ -536,24 +542,86 @@ const ICE_CFG = {
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun3.l.google.com:19302" },
+    // Free TURN servers for NAT traversal when STUN fails
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
   iceCandidatePoolSize: 10,
 };
 
-// Robust helper component for individual remote streams to ensure srcObject attachment
+// Helper: compare two socket IDs to deterministically decide who is "polite"
+// The polite peer yields when both send offers simultaneously (glare)
+const isPolite = (myId, theirId) => myId < theirId;
+
+// Robust helper component for individual remote streams
 function RemoteVideo({ sid, stream, userName }) {
   const videoRef = useRef(null);
+
   useEffect(() => {
-    if (videoRef.current && stream) {
-      if (videoRef.current.srcObject !== stream) {
-        videoRef.current.srcObject = stream;
-        console.log(`[RTC] Stream attached for ${userName} (${sid})`);
-      }
-    }
+    const el = videoRef.current;
+    if (!el || !stream) return;
+
+    // Always reassign srcObject — even if it looks the same, tracks may have changed
+    el.srcObject = stream;
+    console.log(`[RTC] Stream attached for ${userName} (${sid}), tracks: ${stream.getTracks().map(t => t.kind + ":" + t.readyState).join(", ")}`);
+
+    // Force play (some browsers pause autoplay)
+    const tryPlay = () => {
+      el.play().catch(() => {
+        // Retry after user interaction
+        const onClick = () => { el.play().catch(() => {}); document.removeEventListener("click", onClick); };
+        document.addEventListener("click", onClick, { once: true });
+      });
+    };
+    tryPlay();
+
+    // Listen for track additions/removals to re-trigger play
+    const onTrackChange = () => {
+      el.srcObject = stream;
+      tryPlay();
+    };
+    stream.addEventListener("addtrack", onTrackChange);
+    stream.addEventListener("removetrack", onTrackChange);
+
+    return () => {
+      stream.removeEventListener("addtrack", onTrackChange);
+      stream.removeEventListener("removetrack", onTrackChange);
+    };
   }, [stream, sid, userName]);
 
+  // Also re-attach if the stream's active track count changes
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    if (!stream) return;
+    const interval = setInterval(() => {
+      const el = videoRef.current;
+      if (el && stream && (!el.srcObject || el.srcObject !== stream)) {
+        el.srcObject = stream;
+        el.play().catch(() => {});
+      }
+      // If the video is paused for some reason, try to resume
+      if (el && el.paused && stream.active) {
+        el.play().catch(() => {});
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [stream]);
+
   return (
-    <div key={sid} className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
+    <div className="relative aspect-video rounded-2xl overflow-hidden border border-emerald-500/20 bg-[#0d1117] group">
       <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
       <div className="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/60 text-[10px] text-white font-bold flex items-center gap-1 group-hover:bg-black/80 transition-all border border-white/[0.05]">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -572,10 +640,13 @@ const isMobileDevice = () => {
 function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, setScreenStream, session, activeSharers, sessionUsers }) {
   const camVideoRef    = useRef(null);
   const screenVideoRef = useRef(null);
-  const peersRef       = useRef({});
+  const peersRef       = useRef({});        // { socketId: RTCPeerConnection }
+  const iceCandidateBuffers = useRef({});   // { socketId: RTCIceCandidate[] }  — buffered before remoteDescription
+  const makingOfferFor = useRef(new Set()); // track in-flight offers (for perfect negotiation)
+  const retryCountRef  = useRef({});        // { socketId: number } — reconnection attempt counters
   const [remoteStreams, setRemoteStreams] = useState({});
 
-  // Refs for stale closure prevention
+  // Refs to always have latest values in callbacks (no stale closures)
   const socketRef  = useRef(socket);
   const sessionRef = useRef(session);
   const usersRef   = useRef(sessionUsers);
@@ -590,55 +661,105 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
     screenRef.current = screenStream;
   }, [socket, session, sessionUsers, camStream, screenStream]);
 
-  // Force attach local streams to refs
+  // Force attach local streams to video elements
   useEffect(() => { if (camVideoRef.current && camStream) camVideoRef.current.srcObject = camStream; }, [camStream]);
   useEffect(() => { if (screenVideoRef.current && screenStream) screenVideoRef.current.srcObject = screenStream; }, [screenStream]);
 
-  // ── Create/Register a Peer ──
-  const makePeer = (targetSocketId, initiator, targetName) => {
-    let pc = peersRef.current[targetSocketId];
+  // ── Flush buffered ICE candidates once remoteDescription is set ──
+  const flushIceCandidates = useCallback(async (targetSocketId) => {
+    const pc = peersRef.current[targetSocketId];
+    const buffer = iceCandidateBuffers.current[targetSocketId];
+    if (!pc || !pc.remoteDescription || !buffer) return;
     
-    // Create new ONLY if none exists or closed
-    if (!pc || pc.signalingState === "closed") {
-      pc = new RTCPeerConnection(ICE_CFG);
-      peersRef.current[targetSocketId] = pc;
+    for (const candidate of buffer) {
+      try { await pc.addIceCandidate(candidate); } catch (e) {
+        console.warn("[RTC] buffered ICE add failed:", e.message);
+      }
     }
+    iceCandidateBuffers.current[targetSocketId] = [];
+  }, []);
 
-    // Attach ALL current local tracks (Audio + Video)
-    if (camStream) {
-      camStream.getTracks().forEach(track => {
-        const alreadyAdded = pc.getSenders().find(s => s.track === track);
-        if (!alreadyAdded) { try { pc.addTrack(track, camStream); } catch (e) {}}
+  // ── Add tracks from current local streams to an existing peer ──
+  const addLocalTracks = useCallback((pc) => {
+    const currentCam = camRef.current;
+    const currentScreen = screenRef.current;
+
+    const existingSenderTracks = new Set(pc.getSenders().filter(s => s.track).map(s => s.track.id));
+
+    if (currentCam) {
+      currentCam.getTracks().forEach(track => {
+        if (!existingSenderTracks.has(track.id)) {
+          try { pc.addTrack(track, currentCam); } catch (e) { console.warn("[RTC] addTrack cam:", e.message); }
+        }
       });
     }
-    if (screenStream) {
-      screenStream.getTracks().forEach(track => {
-        const alreadyAdded = pc.getSenders().find(s => s.track === track);
-        if (!alreadyAdded) { try { pc.addTrack(track, screenStream); } catch (e) {}}
+    if (currentScreen) {
+      currentScreen.getTracks().forEach(track => {
+        if (!existingSenderTracks.has(track.id)) {
+          try { pc.addTrack(track, currentScreen); } catch (e) { console.warn("[RTC] addTrack screen:", e.message); }
+        }
       });
     }
+  }, []);
 
+  // ── Create or get a peer connection ──
+  const getOrCreatePeer = useCallback((targetSocketId, targetName) => {
+    let pc = peersRef.current[targetSocketId];
+    if (pc && pc.signalingState !== "closed") return pc;
+
+    // Clean up old one if closed
+    if (pc) {
+      try { pc.close(); } catch {}
+      delete peersRef.current[targetSocketId];
+    }
+
+    pc = new RTCPeerConnection(ICE_CFG);
+    peersRef.current[targetSocketId] = pc;
+    iceCandidateBuffers.current[targetSocketId] = [];
+
+    // ── ICE candidates ──
     pc.onicecandidate = (e) => {
       if (e.candidate && socketRef.current) {
         socketRef.current.emit("webrtc-ice-candidate", { to: targetSocketId, candidate: e.candidate });
       }
     };
 
+    // ── Incoming tracks ──
     pc.ontrack = (e) => {
-      console.log(`[RTC] Track received from ${targetName} (${e.track.kind})`);
+      console.log(`[RTC] ontrack from ${targetName}: ${e.track.kind} readyState=${e.track.readyState}`);
+      
       setRemoteStreams(prev => {
         const existing = prev[targetSocketId];
-        let stream = e.streams[0];
+        let stream = e.streams?.[0];
         
-        // Reconstruct stream if missing (common in some Firefox/Safari versions)
         if (!stream) {
+          // No stream provided — create/append to our own MediaStream
           if (existing?.stream) {
+            // Remove any existing track of the same kind to avoid duplicates
+            existing.stream.getTracks().forEach(t => {
+              if (t.kind === e.track.kind && t.id !== e.track.id) {
+                existing.stream.removeTrack(t);
+              }
+            });
             existing.stream.addTrack(e.track);
             stream = existing.stream;
           } else {
             stream = new MediaStream([e.track]);
           }
         }
+
+        // Listen for track ending
+        e.track.onended = () => {
+          console.log(`[RTC] Track ended from ${targetName}: ${e.track.kind}`);
+        };
+
+        e.track.onmute = () => {
+          console.log(`[RTC] Track muted from ${targetName}: ${e.track.kind}`);
+        };
+
+        e.track.onunmute = () => {
+          console.log(`[RTC] Track unmuted from ${targetName}: ${e.track.kind}`);
+        };
         
         return {
           ...prev,
@@ -647,55 +768,174 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       });
     };
 
+    // ── ICE connection state monitoring with reconnection ──
     pc.oniceconnectionstatechange = () => {
-      if (["failed", "closed"].includes(pc.iceConnectionState)) {
-        console.log(`[RTC] Peer ${targetSocketId} connection state: ${pc.iceConnectionState}`);
-        pc.close();
+      const state = pc.iceConnectionState;
+      console.log(`[RTC] ICE state for ${targetName} (${targetSocketId}): ${state}`);
+
+      if (state === "connected" || state === "completed") {
+        // Reset retry counter on successful connection
+        retryCountRef.current[targetSocketId] = 0;
+      }
+
+      if (state === "disconnected") {
+        // Give it a moment — may recover on its own
+        setTimeout(() => {
+          if (peersRef.current[targetSocketId]?.iceConnectionState === "disconnected") {
+            console.log(`[RTC] Still disconnected from ${targetName}, attempting ICE restart...`);
+            tryReconnect(targetSocketId, targetName);
+          }
+        }, 3000);
+      }
+
+      if (state === "failed") {
+        console.log(`[RTC] Connection failed to ${targetName}, reconnecting...`);
+        tryReconnect(targetSocketId, targetName);
+      }
+
+      if (state === "closed") {
         delete peersRef.current[targetSocketId];
         setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
       }
     };
 
-    if (initiator) {
-      pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
-        .then(offer => pc.setLocalDescription(offer))
-        .then(() => {
-          socketRef.current?.emit("webrtc-offer", {
-            sessionId, to: targetSocketId, offer: pc.localDescription,
-            fromUserId: sessionRef.current?.user?.id, fromUserName: sessionRef.current?.user?.name
-          });
-        }).catch(e => console.error("[RTC] offer error:", e));
-    }
+    pc.onconnectionstatechange = () => {
+      console.log(`[RTC] Connection state for ${targetName}: ${pc.connectionState}`);
+      if (pc.connectionState === "failed") {
+        tryReconnect(targetSocketId, targetName);
+      }
+    };
+
+    // Add current local tracks
+    addLocalTracks(pc);
 
     return pc;
-  };
+  }, [addLocalTracks]);
 
-  // ── Connection Lifecycle (Signaling) ──
+  // ── Reconnection with exponential backoff ──
+  const tryReconnect = useCallback((targetSocketId, targetName) => {
+    const retries = retryCountRef.current[targetSocketId] || 0;
+    if (retries >= 5) {
+      console.warn(`[RTC] Max retries reached for ${targetName}, giving up.`);
+      // Clean up
+      const oldPc = peersRef.current[targetSocketId];
+      if (oldPc) { try { oldPc.close(); } catch {} }
+      delete peersRef.current[targetSocketId];
+      setRemoteStreams(prev => { const n = { ...prev }; delete n[targetSocketId]; return n; });
+      return;
+    }
+
+    retryCountRef.current[targetSocketId] = retries + 1;
+    const delay = Math.min(1000 * Math.pow(2, retries), 16000); // 1s, 2s, 4s, 8s, 16s
+
+    console.log(`[RTC] Reconnecting to ${targetName} in ${delay}ms (attempt ${retries + 1}/5)...`);
+
+    setTimeout(() => {
+      // Close old peer
+      const oldPc = peersRef.current[targetSocketId];
+      if (oldPc) { try { oldPc.close(); } catch {} }
+      delete peersRef.current[targetSocketId];
+
+      // Only reconnect if we (or they) still have media
+      const hasLocalMedia = !!(camRef.current || screenRef.current);
+      if (!hasLocalMedia && !socketRef.current) return;
+
+      // Create a fresh peer and send offer
+      const pc = getOrCreatePeer(targetSocketId, targetName);
+      sendOffer(targetSocketId, pc);
+    }, delay);
+  }, [getOrCreatePeer]);
+
+  // ── Send an offer (with perfect negotiation guard) ──
+  const sendOffer = useCallback(async (targetSocketId, pc) => {
+    if (!pc || pc.signalingState === "closed") return;
+    if (makingOfferFor.current.has(targetSocketId)) return; // Already making an offer
+
+    makingOfferFor.current.add(targetSocketId);
+    try {
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+      
+      // Check if signaling state changed while we were creating the offer
+      if (pc.signalingState !== "stable" && pc.signalingState !== "have-local-offer") {
+        console.log("[RTC] Signaling state changed during offer creation, aborting.");
+        return;
+      }
+
+      await pc.setLocalDescription(offer);
+      socketRef.current?.emit("webrtc-offer", {
+        sessionId, to: targetSocketId, offer: pc.localDescription,
+        fromUserId: sessionRef.current?.user?.id,
+        fromUserName: sessionRef.current?.user?.name,
+      });
+    } catch (e) {
+      console.error("[RTC] offer error:", e);
+    } finally {
+      makingOfferFor.current.delete(targetSocketId);
+    }
+  }, [sessionId]);
+
+  // ── Connection Lifecycle (Signaling) — Perfect Negotiation Pattern ──
   useEffect(() => {
     if (!socket) return;
 
     const handleOffer = async ({ from, offer, fromUserName }) => {
-      const pc = makePeer(from, false, fromUserName);
+      const pc = getOrCreatePeer(from, fromUserName);
+      const polite = isPolite(socket.id, from);
+
       try {
+        const offerCollision = pc.signalingState !== "stable" || makingOfferFor.current.has(from);
+
+        if (offerCollision) {
+          if (!polite) {
+            // We're impolite — ignore their offer, ours takes priority
+            console.log(`[RTC] Ignoring colliding offer from ${fromUserName} (we are impolite)`);
+            return;
+          }
+          // We're polite — rollback our pending offer and accept theirs
+          console.log(`[RTC] Accepting colliding offer from ${fromUserName} (we are polite)`);
+          await pc.setLocalDescription({ type: "rollback" });
+        }
+
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        await flushIceCandidates(from);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit("webrtc-answer", { to: from, answer: pc.localDescription });
-      } catch (e) { console.error("[RTC] answer err:", e); }
+      } catch (e) {
+        console.error("[RTC] answer err:", e);
+      }
     };
 
     const handleAnswer = async ({ from, answer }) => {
       const pc = peersRef.current[from];
-      if (pc && pc.signalingState === "have-local-offer") {
-        try { await pc.setRemoteDescription(new RTCSessionDescription(answer)); }
-        catch (e) { console.error("[RTC] answer set err:", e); }
+      if (!pc) return;
+      
+      try {
+        if (pc.signalingState === "have-local-offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          await flushIceCandidates(from);
+        } else {
+          console.warn(`[RTC] Got answer but signalingState is ${pc.signalingState}, ignoring.`);
+        }
+      } catch (e) {
+        console.error("[RTC] answer set err:", e);
       }
     };
 
     const handleIce = async ({ from, candidate }) => {
       const pc = peersRef.current[from];
-      if (pc && pc.remoteDescription) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+      if (!pc) return;
+
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        // Remote description is set — add candidate directly
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } 
+        catch (e) { console.warn("[RTC] ICE add error:", e.message); }
+      } else {
+        // Buffer the candidate until remoteDescription is set
+        if (!iceCandidateBuffers.current[from]) iceCandidateBuffers.current[from] = [];
+        iceCandidateBuffers.current[from].push(new RTCIceCandidate(candidate));
+        console.log(`[RTC] Buffered ICE candidate for ${from} (${iceCandidateBuffers.current[from].length} buffered)`);
       }
     };
 
@@ -709,44 +949,74 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
       socket.off("webrtc-ice-candidate", handleIce);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]);
+  }, [socket, getOrCreatePeer, flushIceCandidates, sendOffer]);
 
-  // Sync connections whenever media or user-list changes
+  // ── Sync connections whenever local media or user-list changes ──
   useEffect(() => {
     if (!socket) return;
     const hasMedia = !!(camStream || screenStream);
     
     const syncAll = () => {
       (sessionUsers || []).forEach(u => {
-        if (u.socketId && u.socketId !== socket.id) {
-          const pc = peersRef.current[u.socketId];
-          const isRemoteSharing = activeSharers["camera"]?.userId === u.userId || activeSharers["screen"]?.userId === u.userId;
-          
-          // If we share, we must ensure an offer is sent
-          if (hasMedia) {
-             makePeer(u.socketId, true, u.userName);
-          } 
-          // If they share and we aren't connected, we initiate to receive
-          else if (isRemoteSharing && !pc) {
-             makePeer(u.socketId, true, u.userName);
+        if (!u.socketId || u.socketId === socket.id) return;
+        
+        const pc = peersRef.current[u.socketId];
+        const isRemoteSharing = activeSharers["camera"]?.userId === u.userId || activeSharers["screen"]?.userId === u.userId;
+        
+        if (hasMedia) {
+          if (!pc || pc.signalingState === "closed" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+            // Need a fresh connection
+            const newPc = getOrCreatePeer(u.socketId, u.userName);
+            sendOffer(u.socketId, newPc);
+          } else {
+            // Connection exists — just make sure tracks are added
+            addLocalTracks(pc);
+            // Re-negotiate if we have new tracks the remote doesn't know about
+            if (pc.signalingState === "stable") {
+              sendOffer(u.socketId, pc);
+            }
           }
+        } else if (isRemoteSharing && !pc) {
+          // They share, we want to receive — send an offer to establish connection
+          const newPc = getOrCreatePeer(u.socketId, u.userName);
+          sendOffer(u.socketId, newPc);
         }
       });
     };
 
-    const timer = setTimeout(syncAll, 600);
+    // Debounce to avoid rapid successive calls
+    const timer = setTimeout(syncAll, 800);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camStream, screenStream, socket, sessionUsers, activeSharers]);
 
+  // ── Cleanup all peers on unmount ──
+  useEffect(() => {
+    return () => {
+      Object.values(peersRef.current).forEach(pc => {
+        try { pc.close(); } catch {}
+      });
+      peersRef.current = {};
+      iceCandidateBuffers.current = {};
+    };
+  }, []);
+
   const toggleCam = async () => {
     if (camStream) {
       camStream.getTracks().forEach(t => t.stop());
+      // Remove tracks from all active peers
+      Object.entries(peersRef.current).forEach(([sid, pc]) => {
+        pc.getSenders().forEach(sender => {
+          if (sender.track && camStream.getTracks().includes(sender.track)) {
+            try { pc.removeTrack(sender); } catch {}
+          }
+        });
+      });
       setCamStream(null);
       socket?.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "off" });
     } else {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
+        const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } }, audio: true });
         setCamStream(s);
         socket?.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "camera", status: "on" });
       } catch { toast.error("Camera access denied."); }
@@ -756,6 +1026,13 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
   const toggleScreen = async () => {
     if (screenStream) {
       screenStream.getTracks().forEach(t => t.stop());
+      Object.entries(peersRef.current).forEach(([sid, pc]) => {
+        pc.getSenders().forEach(sender => {
+          if (sender.track && screenStream.getTracks().includes(sender.track)) {
+            try { pc.removeTrack(sender); } catch {}
+          }
+        });
+      });
       setScreenStream(null);
       socket?.emit("media-status", { sessionId, userId: session?.user?.id, userName: session?.user?.name, type: "screen", status: "off" });
     } else {
@@ -819,7 +1096,7 @@ function MediaPanel({ socket, sessionId, camStream, setCamStream, screenStream, 
 
       <div className="mt-auto p-4 rounded-xl border border-sky-500/15 bg-sky-500/[0.04] text-center">
         <p className="text-[10px] text-gray-500 max-w-xs mx-auto">
-          Connected via Peer-to-Peer WebRTC. High quality video depends on your network stability.
+          Connected via Peer-to-Peer WebRTC with TURN fallback. Auto-reconnects on network issues.
         </p>
       </div>
     </div>
@@ -1558,6 +1835,11 @@ export default function StudyRoomPage() {
     const s = io(backendUrl, {
       path: "/api/socketio",
       transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
     setSocket(s);
 
@@ -1636,10 +1918,24 @@ export default function StudyRoomPage() {
   }, []);
 
   // Join session + group rooms once socket AND session are both ready
+  // Also re-join on reconnect to handle dropped connections
   useEffect(() => {
     if (!socket || !session?.user?.id || !sessionId) return;
-    socket.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
-    socket.emit("join-group", groupId);
+    
+    const joinRooms = () => {
+      socket.emit("join-session", { sessionId, userId: session.user.id, userName: session.user.name });
+      socket.emit("join-group", groupId);
+    };
+    
+    // Join immediately
+    if (socket.connected) joinRooms();
+    
+    // Re-join on connect (covers initial connect + reconnects)
+    socket.on("connect", joinRooms);
+    
+    return () => {
+      socket.off("connect", joinRooms);
+    };
   }, [socket, session?.user?.id, sessionId, groupId]);
 
   const handleRequestPermission = (type) => {
