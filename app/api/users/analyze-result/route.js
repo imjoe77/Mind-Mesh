@@ -8,16 +8,29 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /* ─────────────────────────────────────────────────────────────────
    GRADE MAPPINGS
-   KLE Tech: O=10(95%) A=9(85%) B=8(75%) C=7(65%) D=6(55%) P=5(52%) F=0
-   MindMesh display: S≥90 A≥80 B≥70 C≥60 D≥50 F<50
+   KLE Tech: O=10(95%) A=9(85%) B=8(75%) C=7(65%) D=6(55%) E=5(52%) F=0
+   MindMesh display: S≥90 A≥80 B≥70 C≥60 D≥55 E≥50 F<50 X=detained
+   NOTE: KLE uses E (not P) for pass. Grade points go O>A>B>C>D>E>F.
+         E=5pts is NOT the same as D=6pts — display them distinctly.
 ───────────────────────────────────────────────────────────────── */
 
+// KLE grade point → approximate percentage
 const GRADE_POINT_TO_PERCENT = {
-  10: 95, 9: 85, 8: 75, 7: 65, 6: 55, 5: 52, 4: 48, 3: 40, 2: 35, 1: 33, 0: 0,
+  10: 95,  // O
+  9:  85,  // A
+  8:  75,  // B
+  7:  65,  // C
+  6:  55,  // D
+  5:  52,  // E (Pass)
+  4:  48,  // below pass — rare
+  3:  40,
+  2:  35,
+  1:  33,
+  0:  0,   // F
 };
 
 const LETTER_GRADE_MAP = {
-  // KLE / VTU / common Indian grading
+  // KLE / VTU / common Indian grading — letter → percent
   "O":    95,  "S":    93,  "EX":   97,
   "A+":   90,  "O+":   97,
   "A":    85,  "A1":   90,  "A2":   85,
@@ -25,17 +38,16 @@ const LETTER_GRADE_MAP = {
   "B":    75,
   "C+":   68,  "C":    65,
   "D+":   58,  "D":    55,
-  "E":    52,  // KLE Pass equivalent
+  "E":    52,  // KLE Pass — 5 grade points, distinct from D
   "P":    52,  "PASS": 52,  "DIST": 75,
   "F":    0,   "FAIL": 0,   "FF":   0,
-  // Detained / not eligible / absent — show as 0, still include in results
+  // Detained / not eligible — include in results with 0%
   "X":    0,   "XX":   0,   "DR":   0,
-  // Truly null — no grade info at all, skip
+  // Truly absent — skip these entirely
   "AB":   null, "NE": null, "W": null, "I": null,
 };
 
-// Words/phrases that are NEVER a subject name — checked as full words to avoid false matches
-// e.g. "science" alone would block "Computer Science" so we check boundaries
+// These are NEVER subject names
 const NON_SUBJECT_KEYWORDS_EXACT = [
   "bachelor of", "master of", "b.tech", "m.tech", "b.e.", "m.e.",
   "b.c.a", "m.c.a", "b.sc", "m.sc", "b.com", "m.com",
@@ -57,7 +69,7 @@ function letterToPercent(val) {
   if (val === null || val === undefined || val === "") return null;
   const str = String(val).trim();
 
-  // Fraction format "45/60" or "67/80"
+  // Fraction format "45/60"
   const fracMatch = str.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
   if (fracMatch) {
     const obtained = parseFloat(fracMatch[1]);
@@ -69,7 +81,7 @@ function letterToPercent(val) {
   // Pure number
   const num = parseFloat(str);
   if (!isNaN(num)) {
-    // Integer grade point 0-10
+    // Integer grade point 0–10
     if (Number.isInteger(num) && num >= 0 && num <= 10) {
       return GRADE_POINT_TO_PERCENT[num] ?? Math.round(num * 9.5);
     }
@@ -91,31 +103,66 @@ function letterToPercent(val) {
 function isValidSubjectName(name) {
   if (!name || typeof name !== "string") return false;
   const lower = name.toLowerCase().trim();
-
-  // Too short
   if (lower.length < 4) return false;
-
-  // Pure course code only (e.g. "24EBCBI01", "CS101")
   if (/^[A-Z0-9]{4,12}$/.test(name.trim())) return false;
-
-  // Pure numbers
   if (/^\d+$/.test(name.trim())) return false;
-
-  // Exact prefix matches (degree names like "Bachelor of ...")
   for (const kw of NON_SUBJECT_KEYWORDS_EXACT) {
     if (lower.startsWith(kw)) return false;
   }
-
-  // Substring matches for administrative text
   for (const kw of NON_SUBJECT_KEYWORDS_CONTAINS) {
     if (lower.includes(kw)) return false;
   }
-
   return true;
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   isLikelyCreditsValue — detect when AI confused Credits with GradePoint
+   KLE credits are typically 1.0, 1.5, 2.0, 2.5, 3.0, 4.0
+   Grade points are integers 0-10 (O=10, A=9 ... F=0)
+   The overlap zone (1-4) is where confusion happens.
+   Rule: if a valid letter grade exists, ALWAYS trust the letter grade.
+   Only fall back to gradePoint if no letter grade at all.
+───────────────────────────────────────────────────────────────── */
+function isLikelyCreditsValue(gradePoint) {
+  if (gradePoint === null || gradePoint === undefined) return false;
+  const gp = parseFloat(gradePoint);
+  if (isNaN(gp)) return false;
+  // Non-integer values (1.5, 2.5 etc) are almost certainly credits, not grade points
+  if (!Number.isInteger(gp)) return true;
+  // Grade points are 0-10; credits are typically 1-6 — overlap exists but
+  // we resolve this by preferring letter grade (see sanitiseSubject priority logic)
+  return false;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   gradeLetterForDisplay — what letter to show on the MindMesh card
+   Uses the ORIGINAL extracted grade letter, not derived from percent.
+   This ensures E shows as E, X shows as X, D shows as D etc.
+───────────────────────────────────────────────────────────────── */
+function gradeLetterForDisplay(rawGrade, percent, isDetained) {
+  if (isDetained) return "X";
+  if (rawGrade) {
+    const upper = String(rawGrade).trim().toUpperCase();
+    // Return the letter if it's a known grade — preserves E vs D distinction
+    if (LETTER_GRADE_MAP.hasOwnProperty(upper) && LETTER_GRADE_MAP[upper] !== null) {
+      return upper;
+    }
+  }
+  // Derive from percent as fallback
+  if (percent >= 90) return "S";
+  if (percent >= 80) return "A";
+  if (percent >= 70) return "B";
+  if (percent >= 60) return "C";
+  if (percent >= 55) return "D";
+  if (percent >= 50) return "E";
+  if (percent > 0)   return "F";
+  return "F";
+}
+
+/* ─────────────────────────────────────────────────────────────────
    sanitiseSubject — convert one AI subject row to clean format
+   FIX: Letter grade takes PRIORITY over gradePoint to avoid the
+   "credits column mistaken for grade point" bug with KLE format.
 ───────────────────────────────────────────────────────────────── */
 function sanitiseSubject(raw, index) {
   if (!raw || typeof raw !== "object") return null;
@@ -123,35 +170,44 @@ function sanitiseSubject(raw, index) {
   // Build clean name
   let name = (raw.name || raw.subject || raw.subjectName || raw.courseName || "")
     .trim()
-    .replace(/^\d+[\.\)\:]\s*/, "")           // strip "1. " or "01) "
-    .replace(/^[A-Z0-9]{4,12}\s+/, "")        // strip leading course code
-    .replace(/\s+[A-Z0-9]{4,12}$/, "")        // strip trailing course code
+    .replace(/^\d+[\.\)\:]\s*/, "")
+    .replace(/^[A-Z0-9]{4,12}\s+/, "")
+    .replace(/\s+[A-Z0-9]{4,12}$/, "")
     .trim()
     .slice(0, 80);
 
   if (!isValidSubjectName(name)) return null;
 
-  // Detect detained/null grades before trying to extract percent
-  const gradeRaw = raw.grade ? String(raw.grade).trim().toUpperCase() : null;
-  const isDetained = gradeRaw === "X" || gradeRaw === "XX" || gradeRaw === "DR";
+  const gradeRaw    = raw.grade ? String(raw.grade).trim().toUpperCase() : null;
+  const isDetained  = gradeRaw === "X" || gradeRaw === "XX" || gradeRaw === "DR";
   const isNullGrade = gradeRaw && ["AB", "NE", "W", "I"].includes(gradeRaw);
 
-  // Skip truly null grades (absent/not eligible with no marks info)
   if (isNullGrade && !raw.gradePoint && !raw.marksObtained) return null;
 
   let percent = null;
 
-  // Priority 1: gradePoint column (most reliable for KLE/VTU)
-  if (raw.gradePoint !== null && raw.gradePoint !== undefined && raw.gradePoint !== "") {
-    percent = letterToPercent(raw.gradePoint);
+  // ── PRIORITY 1: Letter grade (most reliable for KLE — avoids credits confusion) ──
+  // If the AI extracted a valid letter grade, use it immediately.
+  // Do NOT override with gradePoint — that column is ambiguous with Credits Earned.
+  if (gradeRaw && LETTER_GRADE_MAP.hasOwnProperty(gradeRaw)) {
+    percent = LETTER_GRADE_MAP[gradeRaw]; // may be null for AB/NE/W/I
   }
 
-  // Priority 2: grade letter column — copy exactly what AI extracted
-  if (percent === null && raw.grade !== null && raw.grade !== undefined && raw.grade !== "") {
-    percent = letterToPercent(String(raw.grade).trim());
+  // ── PRIORITY 2: gradePoint column — ONLY if no letter grade found ──
+  // AND only if it's an integer (non-integer = credits column, skip it)
+  if (percent === null) {
+    const gpVal = raw.gradePoint;
+    if (gpVal !== null && gpVal !== undefined && gpVal !== "") {
+      const gpNum = parseFloat(gpVal);
+      if (!isNaN(gpNum) && Number.isInteger(gpNum)) {
+        // It's an integer — trust it as a grade point
+        percent = letterToPercent(gpNum);
+      }
+      // Non-integer (1.5, 2.5 etc) = definitely credits column, skip
+    }
   }
 
-  // Priority 3: marks obtained / max marks
+  // ── PRIORITY 3: marks obtained / max marks ──
   if (percent === null && raw.marksObtained !== null && raw.marksObtained !== undefined) {
     if (raw.maxMarks) {
       const obtained = parseFloat(raw.marksObtained);
@@ -164,7 +220,7 @@ function sanitiseSubject(raw, index) {
     }
   }
 
-  // Priority 4: any remaining fallback fields
+  // ── PRIORITY 4: other fallback fields ──
   if (percent === null) {
     for (const field of ["percent", "score", "marks", "obtained"]) {
       if (raw[field] !== null && raw[field] !== undefined && raw[field] !== "") {
@@ -174,27 +230,33 @@ function sanitiseSubject(raw, index) {
     }
   }
 
-  // Detained subjects (X grade) — include with 0% so they show up
+  // Detained subjects (X) — always include at 0%
   if (percent === null && isDetained) percent = 0;
 
   if (percent === null || isNaN(percent)) return null;
   percent = Math.max(0, Math.min(100, Math.round(percent)));
 
+  // Color based on percent — E (52%) gets orange, not same as D (55%)
   const COLORS = [
-    { min: 90, color: "#7c3aed" }, // violet — S
-    { min: 80, color: "#0284c7" }, // sky    — A
+    { min: 90, color: "#7c3aed" }, // violet  — S/O
+    { min: 80, color: "#0284c7" }, // sky     — A
     { min: 70, color: "#059669" }, // emerald — B
-    { min: 60, color: "#d97706" }, // amber  — C
-    { min: 50, color: "#ea580c" }, // orange — D/E
-    { min:  1, color: "#dc2626" }, // red    — F
+    { min: 60, color: "#d97706" }, // amber   — C
+    { min: 55, color: "#ea580c" }, // orange  — D
+    { min: 50, color: "#f97316" }, // light orange — E (Pass, distinct from D)
+    { min:  1, color: "#dc2626" }, // red     — F
     { min:  0, color: "#7f1d1d" }, // dark red — X detained
   ];
   const color = COLORS.find(c => percent >= c.min)?.color || "#7f1d1d";
+
+  // Preserve the original grade letter so frontend shows E not D
+  const displayGrade = gradeLetterForDisplay(gradeRaw, percent, isDetained);
 
   return {
     name,
     percent,
     color,
+    grade: displayGrade,                          // ← explicit grade letter for display
     ...(isDetained ? { detained: true } : {}),
   };
 }
@@ -254,37 +316,33 @@ Return ONLY raw JSON — absolutely no markdown, no explanation, no surrounding 
 
 Required JSON format:
 {
-  "semester": "exact semester/exam label from the document (e.g. 'Semester End Examination Results Dec 2024')",
-  "gpa": "exact SGPA or CGPA number as a string (e.g. '8.75'), or 'N/A' if not shown",
+  "semester": "exact semester/exam label from the document",
+  "gpa": "exact SGPA number as a string (e.g. '3.37'), or 'N/A' if not shown",
   "subjects": [
     {
       "name": "Full descriptive subject/course name only — NO course codes",
-      "grade": "exact grade letter copied from the document (e.g. 'A', 'O', 'B+', 'F', 'X', 'P') — do NOT interpret",
-      "gradePoint": <number if a grade point column exists, e.g. 9, else null>,
-      "marksObtained": <number if raw marks column exists, else null>,
-      "maxMarks": <maximum marks if shown, else null>
+      "grade": "exact grade letter copied from the GRADE column only (e.g. 'A', 'O', 'B', 'D', 'E', 'F', 'X'). Copy it exactly as printed. NEVER write a credits value here.",
+      "gradePoint": null,
+      "marksObtained": null,
+      "maxMarks": null
     }
   ]
 }
 
-STRICT EXTRACTION RULES:
-1. ONLY include rows from the SUBJECT/RESULT TABLE. Never include:
+CRITICAL RULES — read carefully:
+1. The GRADE column contains a single letter: O, A, B, C, D, E, F, X. Extract ONLY from this column.
+2. The CREDITS EARNED / CREDITS REGISTERED columns contain numbers like 4.00, 3.00, 2.00 — DO NOT put these in gradePoint. Leave gradePoint as null always.
+3. Copy grade letter EXACTLY: if it says "E" write "E", if it says "X" write "X", if it says "D" write "D". Never convert or guess.
+4. Include X (Detained) grade subjects — do NOT skip them.
+5. ONLY include rows from the subject results table. Never include:
    - Student name, roll number, registration number, enrollment
-   - University/college/institution name
+   - University/college/institution/department name
    - Degree or programme name (e.g. "Bachelor of Computer Application" is NOT a subject)
-   - Branch or department name
-   - SGPA row, CGPA row, Total row, Grand Total row
-   - Any header, footer, watermark, or administrative text
-2. Copy the grade letter EXACTLY as printed. If it says "X" write "X". If it says "A" write "A". Never convert or guess.
-3. IMPORTANT: Include X (Detained) grade subjects — do NOT skip them. They are valid results.
-4. If a subject shows raw marks like "58/80" — put "58/80" in the grade field.
-5. Include ALL subject rows from the table — do not skip any, including detained/failed ones.
-6. Course codes (like "24CS101", "21EBCBI01") must NOT appear in the name — only use the descriptive course title.
-7. If grade is completely blank or shows "-" for a subject, skip it.
-8. The gradePoint field is only for a separate numeric column (like 9, 8, 7) — not the letter grade.
+   - SGPA row, CGPA row, Total row, Grand Total row, any header or footer
+6. Course codes (like "24EBCBI01") must NOT appear in the name — only the descriptive title.
+7. If a row has no grade letter at all, skip it.
 
-This is likely KLE Technological University (O=10pts, A=9pts, B=8pts, C=7pts, D=6pts, P=5pts, F=0pts, X=Detained)
-but handle ANY Indian university format.`;
+This appears to be KLE Technological University format (grades: O > A > B > C > D > E > F > X).`;
 
     console.log(`[ANALYZE] Image: ${(base64Image.length / 1024).toFixed(0)}KB`);
 
@@ -303,9 +361,10 @@ but handle ANY Indian university format.`;
           "X-Title":       "MindMesh Academic Analyzer",
         },
         body: JSON.stringify({
-          model:       "meta-llama/llama-3.2-11b-vision-instruct",
-          max_tokens:  1500,  // higher = more subjects extracted
-          temperature: 0.0,   // deterministic — no guessing
+          // Switched to Gemini Flash — significantly better at table OCR than Llama vision
+          model:       "google/gemini-flash-1.5",
+          max_tokens:  1500,
+          temperature: 0.0,
           messages: [{
             role: "user",
             content: [
@@ -368,13 +427,16 @@ but handle ANY Indian university format.`;
       );
     }
 
+    // Log raw AI output for debugging
+    console.log("[ANALYZE] Raw AI subjects:", JSON.stringify(rawSubjects, null, 2));
+
     // Sanitise — server does ALL conversion, AI just extracts raw values
     const subjects = rawSubjects
       .map((s, i) => sanitiseSubject(s, i))
       .filter(Boolean);
 
     console.log(`[ANALYZE] ${rawSubjects.length} raw → ${subjects.length} clean subjects:`);
-    subjects.forEach(s => console.log(`  · ${s.name}: ${s.percent}%`));
+    subjects.forEach(s => console.log(`  · ${s.name}: ${s.percent}% (${s.grade})`));
 
     if (subjects.length === 0) {
       return NextResponse.json(
