@@ -13,7 +13,8 @@ import {
 
 /* ══════════════════════════════════════════════════════════
    GRADING SYSTEM
-   S:90+ A:80-90 B:70-80 C:60-70 D:50-60 F:<50 X:Fail NE:Not Eligible
+   Matches KLE Tech scale exactly:
+   S:90+ A:80+ B:70+ C:60+ D:55+ E:50+ F:<50 X:Detained NE:Not Eligible
 ══════════════════════════════════════════════════════════ */
 function getGrade(score) {
   if (score === null || score === undefined || score === "") return "NE";
@@ -23,19 +24,22 @@ function getGrade(score) {
   if (n >= 80) return "A";
   if (n >= 70) return "B";
   if (n >= 60) return "C";
-  if (n >= 50) return "D";
+  if (n >= 55) return "D";
+  if (n >= 50) return "E";  // KLE Pass grade — distinct from D
+  if (n > 0)   return "F";
   return "F";
 }
 
 const GRADE_META = {
-  S:  { color: "text-violet-600", bg: "bg-violet-50 border-violet-200",   bar: "bg-violet-500", label: "Outstanding" },
+  S:  { color: "text-violet-600", bg: "bg-violet-50 border-violet-200",   bar: "bg-violet-500",  label: "Outstanding" },
   A:  { color: "text-sky-600",    bg: "bg-sky-50 border-sky-200",         bar: "bg-sky-500",     label: "Excellent"   },
   B:  { color: "text-emerald-600",bg: "bg-emerald-50 border-emerald-200", bar: "bg-emerald-500", label: "Good"        },
   C:  { color: "text-amber-600",  bg: "bg-amber-50 border-amber-200",     bar: "bg-amber-500",   label: "Average"     },
   D:  { color: "text-orange-600", bg: "bg-orange-50 border-orange-200",   bar: "bg-orange-500",  label: "Below Avg"   },
+  E:  { color: "text-orange-500", bg: "bg-orange-50 border-orange-100",   bar: "bg-orange-400",  label: "Pass"        },
   F:  { color: "text-red-600",    bg: "bg-red-50 border-red-200",         bar: "bg-red-500",     label: "Fail"        },
   X:  { color: "text-red-700",    bg: "bg-red-100 border-red-300",        bar: "bg-red-600",     label: "Detained"    },
-  NE: { color: "text-gray-500",   bg: "bg-[#f5f6f8] border-gray-200",       bar: "bg-gray-300",    label: "Not Eligible"},
+  NE: { color: "text-gray-500",   bg: "bg-[#f5f6f8] border-gray-200",     bar: "bg-gray-300",    label: "Not Eligible"},
 };
 
 function GradeBadge({ grade }) {
@@ -126,14 +130,12 @@ function ProfileCard({ user, profile, onUpdate }) {
 
   return (
     <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] overflow-hidden">
-      {/* cover */}
       <div className="h-20 bg-gradient-to-br from-slate-700 via-slate-800 to-indigo-900 relative">
         <div className="absolute inset-0 opacity-20"
           style={{ backgroundImage: `radial-gradient(circle, white 1px, transparent 1px)`, backgroundSize: "18px 18px" }} />
       </div>
 
       <div className="px-5 pb-5">
-        {/* avatar */}
         <div className="flex items-end justify-between -mt-8 mb-4">
           <div className="relative">
             <div className="w-16 h-16 rounded-2xl border-4 border-white shadow-md overflow-hidden bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center">
@@ -151,7 +153,6 @@ function ProfileCard({ user, profile, onUpdate }) {
           </button>
         </div>
 
-        {/* name */}
         <div className="mb-4">
           <h2 className="text-base font-black text-gray-900">{user?.name || "Student"}</h2>
           <p className="text-xs text-gray-400">{user?.email}</p>
@@ -178,16 +179,11 @@ function ProfileCard({ user, profile, onUpdate }) {
 
 /* ══════════════════════════════════════════════════════════
    MARKS UPLOADER + INTELLIGENCE EXTRACTION
-   Calls /api/users/analyze-result with base64Image.
-   AI returns { metrics: { subjects:[{name,percent,color}], gpa, semester } }
-   We map percent → your grading scale (S/A/B/C/D/F/X/NE)
 ══════════════════════════════════════════════════════════ */
-
-/* Convert a File to base64 data URL */
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result); // "data:image/jpeg;base64,..."
+    reader.onload  = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -195,13 +191,12 @@ function fileToBase64(file) {
 
 function MarksCard({ onExtracted }) {
   const [uploading, setUploading] = useState(false);
-  const [metrics,   setMetrics]   = useState(null); // full metrics from API
+  const [metrics,   setMetrics]   = useState(null);
   const [error,     setError]     = useState("");
   const [dragging,  setDragging]  = useState(false);
   const [fallback,  setFallback]  = useState(false);
   const fileRef = useRef(null);
 
-  /* Load saved metrics on mount */
   useEffect(() => {
     fetch("/api/users/profile")
       .then(r => r.json())
@@ -215,7 +210,6 @@ function MarksCard({ onExtracted }) {
 
   const handleFile = async (file) => {
     if (!file) return;
-    // Only images — your API endpoint uses vision model
     const allowed = ["image/jpeg","image/png","image/jpg","image/webp"];
     if (!allowed.includes(file.type)) {
       setError("Please upload a JPG or PNG image of your marks card.");
@@ -225,16 +219,13 @@ function MarksCard({ onExtracted }) {
 
     try {
       const base64Image = await fileToBase64(file);
-
       const res  = await fetch("/api/users/analyze-result", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ base64Image }),
       });
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error || "Analysis failed");
-
       if (data.metrics) {
         setMetrics(data.metrics);
         setFallback(!!data.fallback || !!data.timedOut);
@@ -251,35 +242,38 @@ function MarksCard({ onExtracted }) {
 
   /* ── Results view ── */
   if (metrics?.subjects?.length) {
-    const subjects = metrics.subjects; // [{name, percent, color}]
+    const subjects = metrics.subjects;
     const avg      = Math.round(subjects.reduce((s, x) => s + (x.percent || 0), 0) / subjects.length);
+    // Use stored grade field if present, fall back to computed for old data
+    const resolveGrade = (sub) => sub.grade || getGrade(sub.percent);
     const overall  = getGrade(avg);
     const ogm      = GRADE_META[overall];
 
-    // ── Smart Insights (non-obvious) ──
-    const sorted   = [...subjects].sort((a, b) => a.percent - b.percent);
-    const weakest  = sorted[0];
-    const strongest= sorted[sorted.length - 1];
-    const spread   = strongest.percent - weakest.percent;
-    const above80  = subjects.filter(s => s.percent >= 80).length;
-    const below60  = subjects.filter(s => s.percent < 60).length;
+    const sorted    = [...subjects].sort((a, b) => a.percent - b.percent);
+    const weakest   = sorted[0];
+    const strongest = sorted[sorted.length - 1];
+    const spread    = strongest.percent - weakest.percent;
+    const above80   = subjects.filter(s => s.percent >= 80).length;
+    const below60   = subjects.filter(s => s.percent < 60).length;
 
     const insights = [];
     if (spread >= 20)
-      insights.push(`📊 ${spread}% spread between best & worst — your performance is uneven. Focus on ${weakest.name} to boost your overall GPA.`);
+      insights.push(`📊 ${spread}% spread between best & worst — your performance is uneven. Focus on ${weakest.name} to boost your GPA.`);
     else
-      insights.push(`📊 Only ${spread}% spread across all subjects — you have a consistent performance profile.`);
+      insights.push(`📊 Only ${spread}% spread across all subjects — consistent performance profile.`);
 
     if (above80 >= subjects.length * 0.5)
-      insights.push(`🔥 ${above80} of ${subjects.length} subjects are above 80% — you're performing well in the majority of your coursework.`);
+      insights.push(`🔥 ${above80} of ${subjects.length} subjects above 80% — performing well in the majority of coursework.`);
     else if (below60 > 0)
-      insights.push(`⚠️ ${below60} subject${below60 > 1 ? "s are" : " is"} below 60% — at risk of failing. Prioritise these before others.`);
+      insights.push(`⚠️ ${below60} subject${below60 > 1 ? "s are" : " is"} below 60% — at risk. Prioritise these before others.`);
 
     if (strongest && weakest && strongest.percent !== weakest.percent)
-      insights.push(`💡 ${strongest.name} is your strongest subject at ${strongest.percent}% — use this strength as motivation when studying ${weakest.name}.`);
+      insights.push(`💡 ${strongest.name} is your strongest at ${strongest.percent}% — use this as motivation when studying ${weakest.name}.`);
 
-    // ── Grading Scale legend (top) ──
     const hasRealGpa = metrics.gpa && metrics.gpa !== "N/A" && metrics.gpa !== "null";
+
+    // Count attention subjects using stored grade field
+    const attentionCount = subjects.filter(s => ["F","X"].includes(resolveGrade(s))).length;
 
     return (
       <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-5 space-y-4">
@@ -298,7 +292,6 @@ function MarksCard({ onExtracted }) {
               </p>
             </div>
           </div>
-          {/* GPA exactly as on the card */}
           <div className="text-right">
             {hasRealGpa ? (
               <>
@@ -314,9 +307,9 @@ function MarksCard({ onExtracted }) {
           </div>
         </div>
 
-        {/* Grading scale mini legend */}
-        <div className="grid grid-cols-8 gap-1">
-          {["S","A","B","C","D","F","X","NE"].map(g => {
+        {/* Grading scale legend — now includes E */}
+        <div className="grid grid-cols-9 gap-1">
+          {["S","A","B","C","D","E","F","X","NE"].map(g => {
             const gm = GRADE_META[g];
             return (
               <div key={g} className={`rounded-lg border py-1 text-center ${gm.bg}`}>
@@ -333,10 +326,11 @@ function MarksCard({ onExtracted }) {
           <p className="text-[10px] text-gray-500">{subjects.length} subjects</p>
         </div>
 
-        {/* Subject rows — show grade as-is, progress bar from percent */}
+        {/* Subject rows */}
         <div className="space-y-2.5">
           {subjects.map((sub, i) => {
-            const grade = getGrade(sub.percent);
+            // KEY FIX: use sub.grade from backend directly, only fall back to computed for old cached data
+            const grade = resolveGrade(sub);
             const gm2   = GRADE_META[grade] || GRADE_META.NE;
             const pct   = Math.min(sub.percent || 0, 100);
             return (
@@ -351,7 +345,7 @@ function MarksCard({ onExtracted }) {
                 <div className="h-1.5 bg-[#eff0f3] rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${pct}%`, background: sub.color || gm2.bar.replace("bg-","") }}
+                    style={{ width: `${pct}%`, background: sub.color || "#ea580c" }}
                   />
                 </div>
                 <p className={`text-[9px] font-semibold ${gm2.color}`}>{gm2.label}</p>
@@ -373,8 +367,8 @@ function MarksCard({ onExtracted }) {
           <div>
             <p className={`text-xs font-black ${ogm.color}`}>Overall Performance</p>
             <p className="text-[10px] text-gray-500 mt-0.5">
-              {subjects.filter(s => getGrade(s.percent) === "F" || getGrade(s.percent) === "X").length > 0
-                ? `⚠ ${subjects.filter(s => ["F","X"].includes(getGrade(s.percent))).length} subject(s) need attention`
+              {attentionCount > 0
+                ? `⚠ ${attentionCount} subject(s) need attention`
                 : "✓ All subjects cleared — great work!"}
             </p>
           </div>
@@ -447,11 +441,11 @@ function MarksCard({ onExtracted }) {
         </div>
       )}
 
-      {/* Grading scale legend */}
+      {/* Grading scale legend — includes E */}
       <div>
         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">Grading Scale</p>
-        <div className="grid grid-cols-4 gap-1.5">
-          {["S","A","B","C","D","F","X","NE"].map(g => {
+        <div className="grid grid-cols-5 gap-1.5">
+          {["S","A","B","C","D","E","F","X","NE"].map(g => {
             const gm = GRADE_META[g];
             return (
               <div key={g} className={`rounded-lg border px-2 py-1.5 text-center ${gm.bg}`}>
@@ -467,8 +461,7 @@ function MarksCard({ onExtracted }) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   STREAK CARD — full original logic preserved
-   Grace period · Quests · Simulate Lab · Restored animation
+   STREAK CARD
 ══════════════════════════════════════════════════════════ */
 const QUEST_ICONS = { quiz: "🧠", flashcard: "📇", join_session: "👥", read: "📖" };
 
@@ -580,7 +573,6 @@ function StreakCard() {
                      "border-[#e2e5eb] hover:shadow-lg hover:shadow-indigo-500/5"
     }`}>
 
-      {/* Header */}
       <div className={`px-6 pt-6 pb-4 relative ${isGrace ? "bg-amber-50/40" : ""}`}>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
@@ -603,7 +595,6 @@ function StreakCard() {
           </div>
         </div>
 
-        {/* 7-day bar */}
         <div className="grid grid-cols-7 gap-2 mt-6">
           {last7.map((day, i) => {
             const active  = i < streakCount && streakCount > 0;
@@ -623,7 +614,6 @@ function StreakCard() {
           })}
         </div>
 
-        {/* Stats grid */}
         <div className="grid grid-cols-3 gap-2.5 mt-6">
           {[
             { label: "Best", value: data.best || 0,     icon: "🏆" },
@@ -639,11 +629,9 @@ function StreakCard() {
         </div>
       </div>
 
-      {/* Quest / Action zone */}
       <div className="px-6 pb-6 pt-2">
         {isGrace ? (
           <div className="space-y-3">
-            {/* At-risk banner */}
             <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-4 relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-2 text-3xl opacity-10 group-hover:rotate-12 transition-transform">⚠️</div>
               <p className="text-[13px] font-bold text-amber-800 tracking-tight">At Risk!</p>
@@ -660,7 +648,6 @@ function StreakCard() {
               )}
             </div>
 
-            {/* Quest list */}
             <div className="space-y-2">
               {quests.map(q => (
                 <div key={q.id} className={`group flex items-center gap-3.5 rounded-xl border p-3.5 transition-all duration-300 ${
@@ -698,7 +685,6 @@ function StreakCard() {
             </div>
           </div>
         ) : (
-          /* Normal state motivational tip */
           <div className="bg-indigo-50/60 border border-indigo-100/50 rounded-xl p-4 flex items-center gap-3.5 relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-100/20 rounded-full blur-2xl -mr-10 -mt-10 group-hover:bg-indigo-200/30 transition duration-700" />
             <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center text-lg shadow-sm relative z-10">💡</div>
@@ -713,7 +699,6 @@ function StreakCard() {
         )}
       </div>
 
-      {/* Streak Restored overlay */}
       {restoredAnim && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-emerald-500/10 backdrop-blur-sm animate-in fade-in duration-500">
           <div className="bg-emerald-500 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-2xl animate-bounce">
@@ -722,7 +707,6 @@ function StreakCard() {
         </div>
       )}
 
-      {/* Lab Controls — hidden until hover */}
       <div className="border-t border-[#eeeff2] px-6 py-3 flex justify-between items-center opacity-25 hover:opacity-100 transition-opacity">
         <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Lab Controls</span>
         <div className="flex gap-2">
@@ -916,7 +900,7 @@ function ProgressCard({ metrics }) {
     <div className="bg-[#fdfdfe] rounded-2xl border border-[#e2e5eb] shadow-[0_1px_4px_rgba(0,0,0,0.07)] p-5">
       <div className="flex items-center gap-2 mb-4">
         <div className="w-8 h-8 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center">
-          <TrendingUp className="text-sky-500" style={{ width: 15, height: 15 }} />
+          <TrendingUp className="text-sky-500" style={{ width: 16, height: 16 }} />
         </div>
         <h3 className="text-sm font-black text-gray-900">Your Progress</h3>
       </div>
@@ -934,7 +918,7 @@ function ProgressCard({ metrics }) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   PHONE VERIFICATION
+   PHONE CARD
 ══════════════════════════════════════════════════════════ */
 function PhoneCard({ profile, onUpdate }) {
   const [editing, setEditing] = useState(false);
@@ -964,8 +948,7 @@ function PhoneCard({ profile, onUpdate }) {
         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Phone</p>
         <p className="text-sm font-bold text-gray-800">{profile.phone}</p>
       </div>
-      <button onClick={() => setEditing(true)}
-        className="text-gray-400 hover:text-sky-500 transition-colors">
+      <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-sky-500 transition-colors">
         <Edit2 style={{ width: 13, height: 13 }} />
       </button>
     </div>
@@ -1033,11 +1016,10 @@ export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  const [profile,  setProfile]  = useState(null);
-  const [groups,   setGroups]   = useState([]);
-  const [metrics,  setMetrics]  = useState(null);
-  const [streak,   setStreak]   = useState(null);
-  const [extracted,setExtracted]= useState(null);
+  const [profile,   setProfile]   = useState(null);
+  const [groups,    setGroups]    = useState([]);
+  const [metrics,   setMetrics]   = useState(null);
+  const [extracted, setExtracted] = useState(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/Login");
@@ -1046,20 +1028,17 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!session?.user?.email) return;
 
-    // 1. Instant recovery from local system
     const saved = localStorage.getItem(`user_profile_${session.user.email}`);
     if (saved) {
       try { setProfile(JSON.parse(saved)); } catch (e) {}
     }
 
-    // 2. Fetch from cloud database
     fetch("/api/users/profile").then(r => r.json()).then(d => {
       if (d.user) {
         setProfile(prev => {
-          const cloud = d.user;
-          const local = prev || {};
+          const cloud  = d.user;
+          const local  = prev || {};
           const merged = { ...local, ...cloud };
-          // Merge: Only let cloud overwrite local if cloud actually has data
           ["branch", "semester", "year", "rollNumber", "institution", "bio"].forEach(f => {
             if (local[f] && !cloud[f]) merged[f] = local[f];
           });
@@ -1069,7 +1048,6 @@ export default function DashboardPage() {
       }
     });
 
-    // fetch groups
     fetch("/api/groups?mine=true").then(r => r.json()).then(d => {
       setGroups(d.groups || []);
     });
@@ -1094,13 +1072,9 @@ export default function DashboardPage() {
       <main className="flex-1 w-full max-w-[1600px] mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr_280px] gap-5 p-5 lg:p-6">
 
-          {/* ── LEFT: Profile ── */}
+          {/* LEFT */}
           <aside className="space-y-4">
-            <ProfileCard
-              user={session.user}
-              profile={profile}
-              onUpdate={setProfile}
-            />
+            <ProfileCard user={session.user} profile={profile} onUpdate={setProfile} />
             <PhoneCard profile={profile} onUpdate={setProfile} />
             <SkillsCard
               profile={profile}
@@ -1111,13 +1085,13 @@ export default function DashboardPage() {
             />
           </aside>
 
-          {/* ── MIDDLE: Primary content ── */}
+          {/* MIDDLE */}
           <section className="space-y-4">
             <MarksCard onExtracted={data => setExtracted(data)} />
             <ProgressCard metrics={{ ...metrics, skillsCount }} />
           </section>
 
-          {/* ── RIGHT: Social & engagement ── */}
+          {/* RIGHT */}
           <aside className="space-y-4">
             <StreakCard />
             <MyGroupsCard groups={groups} />
