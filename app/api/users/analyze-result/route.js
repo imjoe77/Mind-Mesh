@@ -362,9 +362,15 @@ This appears to be KLE Technological University format (grades: O > A > B > C > 
         },
         body: JSON.stringify({
           // Switched to Gemini Flash — significantly better at table OCR than Llama vision
-          model:       "google/gemini-flash-1.5",
+        model: "nvidia/nemotron-nano-12b-v2-vl:free",
           max_tokens:  1500,
           temperature: 0.0,
+            // Fallback chain — if primary is down, OpenRouter tries these in order
+  route: "fallback",
+  models: [
+    "nvidia/nemotron-nano-12b-v2-vl:free",
+    "openrouter/free",           // auto-picks any available free vision model
+  ],
           messages: [{
             role: "user",
             content: [
