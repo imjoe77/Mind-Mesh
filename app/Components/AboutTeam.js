@@ -90,7 +90,7 @@ export default function AboutTeam() {
     {
       name: "Prajwal Awati",
       role: "Documentation/Presentation",
-      image: "/pjew.jpeg",
+      image: "/pjew.jpg",
     },
   ];
 
@@ -113,16 +113,13 @@ export default function AboutTeam() {
               {/* Small round profile image */}
               <div className="relative w-24 h-24 mb-4 rounded-full overflow-hidden border-2 border-slate-700 group-hover:border-blue-400 transition shadow-inner bg-slate-800">
                 <Image
-                  src={m.image}
-                  alt={m.name}
-                  fill
-                  className={`object-cover ${
-                    m.name === "Abhijith Kadakuntla"
-                      ? "[object-position:50%_20%]"
-                      : "object-center"
-                  }`}
-                  sizes="96px"
-                />
+  src={m.image}
+  alt={m.name}
+  fill
+  unoptimized
+  className="object-cover object-center"
+  sizes="96px"
+/>
               </div>
 
               {/* Text */}
