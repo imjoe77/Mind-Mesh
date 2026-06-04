@@ -88,9 +88,9 @@ export default function AboutTeam() {
       image: "/ansar.jpeg",
     },
     {
-      name: "Abhijith Kadakuntla",
+      name: "Prajwal Awati",
       role: "Documentation/Presentation",
-      image: "/abhijithcard.jpeg",
+      image: "/pjew.jpeg",
     },
   ];
 
