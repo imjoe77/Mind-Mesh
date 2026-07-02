@@ -1,12 +1,10 @@
-# 🧠 MindMesh
+# <img src="public/logo.png" alt="MindMesh Logo" width="120" />  MindMesh
 
 > 🚀 **Built during our first hackathon**
 
 An AI-powered collaborative learning platform that brings students together through intelligent study groups, real-time collaboration, gamification, and AI-assisted learning.
 
 <p align="center">
-<img src="public/logo.png" alt="MindMesh Logo" width="120" />
-</p>
 
 ![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
